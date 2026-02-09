@@ -11,6 +11,7 @@ const healthRouter = require("./routes/health");
 const authRouter = require("./routes/auth");
 const roomsRouter = require("./routes/rooms");
 const songsRouter = require("./routes/songs");
+const youtubeRouter = require("./routes/youtube");
 
 const app = express();
 const server = http.createServer(app);
@@ -25,6 +26,7 @@ app.use("/api/auth", authRouter);       // POST /api/auth/register, /login, GET 
 app.use("/api/rooms", roomsRouter);     // POST / GET /api/rooms
 app.use("/api/rooms", songsRouter);     // POST / GET /api/rooms/:roomId/songs
 app.use("/api", songsRouter);           // POST /api/songs/:songId/upvote
+app.use("/api/youtube", youtubeRouter); // GET /api/youtube/search?q=...
 
 // ---------- Socket.io ----------
 const io = new Server(server, {

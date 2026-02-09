@@ -14,6 +14,15 @@ router.post("/:roomId/songs", requireAuth, async (req, res) => {
       return res.status(400).json({ error: "title and url are required" });
     }
 
+    // Check room mode — in listen_only, only the host can add songs
+    const room = await prisma.room.findUnique({ where: { id: roomId } });
+    if (!room) {
+      return res.status(404).json({ error: "Room not found" });
+    }
+    if (room.mode === "listen_only" && room.createdBy !== req.user.id) {
+      return res.status(403).json({ error: "Room is in listen-only mode. Only the host can add songs." });
+    }
+
     const song = await prisma.song.create({
       data: {
         roomId,

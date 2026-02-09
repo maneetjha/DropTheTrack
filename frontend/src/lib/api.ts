@@ -17,6 +17,7 @@ export interface Room {
   id: string;
   name: string;
   code: string;
+  mode: "open" | "listen_only";
   createdBy: string | null;
   createdAt: string;
 }
@@ -123,11 +124,56 @@ export async function getRoom(id: string): Promise<Room> {
   return res.json();
 }
 
+export async function updateRoomMode(id: string, mode: "open" | "listen_only"): Promise<Room> {
+  const res = await fetch(`${API_URL}/rooms/${id}`, {
+    method: "PATCH",
+    headers: authHeaders(),
+    body: JSON.stringify({ mode }),
+  });
+  if (!res.ok) {
+    const data = await res.json();
+    throw new Error(data.error || "Failed to update room");
+  }
+  return res.json();
+}
+
+export async function deleteRoom(id: string): Promise<void> {
+  const res = await fetch(`${API_URL}/rooms/${id}`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+  if (!res.ok) {
+    const data = await res.json();
+    throw new Error(data.error || "Failed to delete room");
+  }
+}
+
 export async function joinRoomByCode(code: string): Promise<Room> {
   const res = await fetch(`${API_URL}/rooms/join/${code}`, { cache: "no-store" });
   if (!res.ok) {
     const data = await res.json();
     throw new Error(data.error || "Room not found");
+  }
+  return res.json();
+}
+
+// ---------- YouTube ----------
+
+export interface YouTubeResult {
+  videoId: string;
+  title: string;
+  thumbnail: string | null;
+  channelTitle: string;
+}
+
+export async function searchYouTube(query: string): Promise<YouTubeResult[]> {
+  const res = await fetch(`${API_URL}/youtube/search?q=${encodeURIComponent(query)}`, {
+    headers: authHeaders(),
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    const data = await res.json();
+    throw new Error(data.error || "YouTube search failed");
   }
   return res.json();
 }
