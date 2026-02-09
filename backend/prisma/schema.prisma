@@ -1,0 +1,64 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String   @db.VarChar(100)
+  email     String   @unique @db.VarChar(255)
+  password  String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  songs Song[]
+  votes Vote[]
+
+  @@map("users")
+}
+
+model Room {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String   @db.VarChar(100)
+  code      String   @unique @db.VarChar(8)
+  createdBy String?  @map("created_by") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
+  songs     Song[]
+
+  @@map("rooms")
+}
+
+model Song {
+  id        String   @id @default(uuid()) @db.Uuid
+  roomId    String   @map("room_id") @db.Uuid
+  title     String   @db.VarChar(300)
+  url       String
+  thumbnail String?
+  userId    String   @map("user_id") @db.Uuid
+  upvotes   Int      @default(0)
+  isPlaying Boolean  @default(false) @map("is_playing")
+  played    Boolean  @default(false)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  room  Room   @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user  User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  votes Vote[]
+
+  @@map("songs")
+}
+
+model Vote {
+  id        String   @id @default(uuid()) @db.Uuid
+  songId    String   @map("song_id") @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
+
+  song Song @relation(fields: [songId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([songId, userId])
+  @@map("votes")
+}
