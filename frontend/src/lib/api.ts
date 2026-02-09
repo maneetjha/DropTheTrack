@@ -31,6 +31,7 @@ export interface Song {
   userId: string;
   user: { id: string; name: string };
   upvotes: number;
+  hasVoted: boolean;
   isPlaying: boolean;
   played: boolean;
   createdAt: string;
@@ -182,6 +183,7 @@ export async function searchYouTube(query: string): Promise<YouTubeResult[]> {
 
 export async function getSongs(roomId: string): Promise<Song[]> {
   const res = await fetch(`${API_URL}/rooms/${roomId}/songs`, {
+    headers: authHeaders(),
     cache: "no-store",
   });
   if (!res.ok) throw new Error("Failed to fetch songs");
@@ -207,9 +209,8 @@ export async function upvoteSong(songId: string): Promise<Song> {
     headers: authHeaders(),
   });
   if (!res.ok) {
-    if (res.status === 409) throw new Error("Already voted");
     if (res.status === 401) throw new Error("Login required");
-    throw new Error("Failed to upvote");
+    throw new Error("Failed to toggle vote");
   }
   return res.json();
 }

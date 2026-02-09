@@ -53,6 +53,10 @@ function initSockets(io) {
     socket.on("leave-room", async (roomId) => {
       socket.leave(roomId);
       await removeUserConnection(roomId, socket.data.userId, io);
+      // Clear data so the disconnect handler doesn't double-decrement
+      socket.data.roomId = null;
+      socket.data.userId = null;
+      socket.data.userName = null;
     });
 
     // Room settings updated by host — broadcast to everyone in the room

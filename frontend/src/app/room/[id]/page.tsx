@@ -193,6 +193,19 @@ export default function RoomPage() {
       return;
     }
 
+    // Optimistic update
+    setSongs((prev) =>
+      prev.map((s) => {
+        if (s.id !== songId) return s;
+        const wasVoted = s.hasVoted;
+        return {
+          ...s,
+          hasVoted: !wasVoted,
+          upvotes: wasVoted ? s.upvotes - 1 : s.upvotes + 1,
+        };
+      }).sort((a, b) => b.upvotes - a.upvotes)
+    );
+
     try {
       const updated = await upvoteSong(songId);
       setSongs((prev) =>
@@ -208,9 +221,9 @@ export default function RoomPage() {
         upvotes: updated.upvotes,
       });
     } catch (err: unknown) {
-      if (err instanceof Error && err.message === "Already voted") {
-        alert("You already voted for this song!");
-      } else if (err instanceof Error && err.message === "Login required") {
+      // Revert optimistic update
+      fetchSongs();
+      if (err instanceof Error && err.message === "Login required") {
         alert("Please log in to vote!");
       } else {
         console.error(err);
@@ -299,7 +312,7 @@ export default function RoomPage() {
 
       <main className="relative z-[1] mx-auto max-w-3xl px-4 pt-24 pb-16 sm:px-6">
         {/* Room Header */}
-        <div className="animate-fade-in-up mb-8">
+        <div className="animate-fade-in-up relative z-20 mb-8">
           <button
             onClick={handleLeaveRoom}
             className="mb-3 inline-flex items-center gap-1 text-sm text-[var(--text-muted)] transition hover:text-[var(--primary)]"
@@ -435,7 +448,7 @@ export default function RoomPage() {
 
         {/* Add Song — YouTube Search */}
         {canAddSongs ? (
-          <div className="animate-fade-in-up-1 mb-8 rounded-3xl border border-white/5 bg-white/[0.02] p-6" ref={searchRef}>
+          <div className="animate-fade-in-up-1 relative z-10 mb-8 rounded-3xl border border-white/5 bg-white/[0.02] p-6" ref={searchRef}>
             <h2 className="mb-4 text-lg font-semibold text-[var(--text-light)]">
               Add a Song
             </h2>
@@ -594,12 +607,26 @@ export default function RoomPage() {
                   {/* Upvote Button */}
                   <button
                     onClick={() => handleUpvote(song.id)}
-                    className="flex shrink-0 flex-col items-center gap-0.5 rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 transition-all hover:border-[rgba(107,90,237,0.4)] hover:bg-[rgba(107,90,237,0.1)] sm:px-4 sm:py-2"
+                    className={`flex shrink-0 flex-col items-center gap-0.5 rounded-xl border px-3 py-1.5 transition-all sm:px-4 sm:py-2 ${
+                      song.hasVoted
+                        ? "border-[var(--primary)] bg-[rgba(107,90,237,0.15)] shadow-[0_0_12px_rgba(107,90,237,0.2)]"
+                        : "border-white/10 bg-white/5 hover:border-[rgba(107,90,237,0.4)] hover:bg-[rgba(107,90,237,0.1)]"
+                    }`}
                   >
-                    <svg className="h-4 w-4 text-[var(--primary)] sm:h-5 sm:w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <svg
+                      className={`h-4 w-4 sm:h-5 sm:w-5 transition-all ${
+                        song.hasVoted ? "text-[var(--primary)] scale-110" : "text-[var(--text-muted)]"
+                      }`}
+                      fill={song.hasVoted ? "currentColor" : "none"}
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      strokeWidth={2}
+                    >
                       <path strokeLinecap="round" strokeLinejoin="round" d="M5 15l7-7 7 7" />
                     </svg>
-                    <span className="text-xs font-bold text-[var(--text-light)] sm:text-sm">
+                    <span className={`text-xs font-bold sm:text-sm ${
+                      song.hasVoted ? "text-[var(--primary)]" : "text-[var(--text-light)]"
+                    }`}>
                       {song.upvotes}
                     </span>
                   </button>
