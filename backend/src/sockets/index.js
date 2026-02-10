@@ -1,16 +1,15 @@
+const prisma = require("../config/db");
 const redis = require("../config/redis");
 
 /**
  * Socket.io setup — handles real-time room events + user tracking.
  *
- * Tracks users by userId (not socketId) so that the same user
- * on multiple tabs only counts once. We keep a connection count
- * per user so we only remove them when ALL tabs disconnect.
+ * User presence is determined by Socket.io's own room membership
+ * (io.in(roomId).fetchSockets()) — this is always accurate and
+ * self-healing. No more Redis connection counts that drift.
  *
- * Auto-cleanup: when a room hits 0 users, a Redis key is set
- * with a 5-minute TTL. While that key exists, the room is hidden
- * from the active rooms list. If someone joins before it expires,
- * the key is deleted and the room is visible again.
+ * Playback state (play/pause + position) is stored in Redis per room
+ * and synced to all clients. Only the host can control playback.
  */
 function initSockets(io) {
   io.on("connection", (socket) => {
@@ -20,12 +19,11 @@ function initSockets(io) {
     socket.on("join-room", async ({ roomId, userId, userName }) => {
       const newUserId = userId || socket.id;
       const newUserName = userName || "Anonymous";
-      const oldUserId = socket.data.userId;
-      const oldRoomId = socket.data.roomId;
 
-      // If this socket previously joined with a different identity, clean up the old one
-      if (redis && oldUserId && oldUserId !== newUserId && oldRoomId) {
-        await removeUserConnection(oldRoomId, oldUserId, io);
+      // If previously in a different room, leave it first
+      if (socket.data.roomId && socket.data.roomId !== roomId) {
+        socket.leave(socket.data.roomId);
+        await broadcastRoomUsers(io, socket.data.roomId);
       }
 
       socket.join(roomId);
@@ -35,28 +33,23 @@ function initSockets(io) {
 
       console.log(`[Socket] ${newUserName} (${newUserId}) joined room ${roomId}`);
 
-      if (redis) {
-        // Room is active again — clear any empty-since marker
-        await redis.del(`room:${roomId}:empty_since`);
+      await broadcastRoomUsers(io, roomId);
 
-        // Store user info: room:{roomId}:users hash — key=userId, value=userName
-        await redis.hset(`room:${roomId}:users`, newUserId, newUserName);
-        // Track connection count: room:{roomId}:conns:{userId}
-        await redis.incr(`room:${roomId}:conns:${newUserId}`);
+      // Send current playback state to the new joiner so they sync up
+      const pbState = await getPlaybackState(roomId);
+      if (pbState) {
+        socket.emit("playback-sync", pbState);
       }
-
-      const users = await getRoomUsers(roomId);
-      io.to(roomId).emit("users-updated", users);
     });
 
     // Leave a room
     socket.on("leave-room", async (roomId) => {
       socket.leave(roomId);
-      await removeUserConnection(roomId, socket.data.userId, io);
-      // Clear data so the disconnect handler doesn't double-decrement
       socket.data.roomId = null;
       socket.data.userId = null;
       socket.data.userName = null;
+
+      await broadcastRoomUsers(io, roomId);
     });
 
     // Room settings updated by host — broadcast to everyone in the room
@@ -81,51 +74,139 @@ function initSockets(io) {
       });
     });
 
+    // Song removed — broadcast to room
+    socket.on("song-removed", ({ roomId, songId }) => {
+      socket.to(roomId).emit("queue-updated", { songId, action: "removed" });
+    });
+
+    // Playback changed (play a song / skip) — broadcast to room + reset playback state
+    socket.on("playback-changed", async ({ roomId }) => {
+      // When a new song starts or is skipped, reset playback state to playing
+      await setPlaybackState(roomId, {
+        isPaused: false,
+        currentTime: 0,
+        updatedAt: Date.now(),
+      });
+      io.to(roomId).emit("queue-updated", { action: "playback" });
+      io.to(roomId).emit("playback-sync", {
+        isPaused: false,
+        currentTime: 0,
+        updatedAt: Date.now(),
+      });
+    });
+
+    // Host play/pause — syncs playback state across all clients
+    socket.on("host-playback", async ({ roomId, isPaused, currentTime }) => {
+      const state = {
+        isPaused: !!isPaused,
+        currentTime: currentTime || 0,
+        updatedAt: Date.now(),
+      };
+      await setPlaybackState(roomId, state);
+      // Broadcast to ALL clients in the room (including the sender, for consistency)
+      io.to(roomId).emit("playback-sync", state);
+      console.log(`[Socket] Host ${isPaused ? "paused" : "resumed"} in room ${roomId} at ${currentTime.toFixed(1)}s`);
+    });
+
     // Disconnect — clean up
     socket.on("disconnect", async () => {
-      const { roomId, userId } = socket.data;
+      const { roomId } = socket.data;
       console.log(`[Socket] Client disconnected: ${socket.id}`);
 
       if (roomId) {
-        await removeUserConnection(roomId, userId, io);
+        await broadcastRoomUsers(io, roomId);
       }
     });
   });
 }
 
-/**
- * Decrement connection count for a user. If it hits 0,
- * remove them from the room's user list entirely.
- * If the room becomes empty, set the empty_since marker with 5-min TTL.
- */
-async function removeUserConnection(roomId, userId, io) {
-  if (!redis || !userId) return;
+// ---- Playback state helpers (Redis) ----
 
-  const key = `room:${roomId}:conns:${userId}`;
-  const count = await redis.decr(key);
-
-  if (count <= 0) {
-    // Last tab closed — remove user from room
-    await redis.del(key);
-    await redis.hdel(`room:${roomId}:users`, userId);
-  }
-
-  const users = await getRoomUsers(roomId);
-  io.to(roomId).emit("users-updated", users);
-
-  // If room is now empty, mark it for auto-hide after 5 minutes
-  if (users.length === 0) {
-    await redis.set(`room:${roomId}:empty_since`, Date.now().toString(), "EX", 300);
-    console.log(`[Socket] Room ${roomId} is empty — will hide from list in 5 minutes`);
+async function getPlaybackState(roomId) {
+  if (!redis) return null;
+  try {
+    const raw = await redis.get(`room:${roomId}:playback`);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
   }
 }
 
-/** Get list of unique users in a room from Redis */
-async function getRoomUsers(roomId) {
-  if (!redis) return [];
-  const hash = await redis.hgetall(`room:${roomId}:users`);
-  // hash = { userId: userName, ... }
-  return Object.entries(hash).map(([id, name]) => ({ id, name }));
+async function setPlaybackState(roomId, state) {
+  if (!redis) return;
+  try {
+    // TTL of 24 hours — auto-cleanup
+    await redis.set(`room:${roomId}:playback`, JSON.stringify(state), "EX", 86400);
+  } catch {
+    // Redis write failure — non-critical
+  }
+}
+
+/**
+ * Get the deduplicated list of users in a room by querying
+ * Socket.io's actual room membership — always accurate.
+ * Includes isHost flag and always keeps the host in the list (at the top).
+ */
+async function getRoomUsers(io, roomId) {
+  const sockets = await io.in(roomId).fetchSockets();
+  const userMap = new Map();
+
+  for (const s of sockets) {
+    const uid = s.data.userId;
+    if (uid) {
+      userMap.set(uid, s.data.userName || "Anonymous");
+    }
+  }
+
+  // Look up the room creator
+  let hostId = null;
+  let hostName = null;
+  try {
+    const room = await prisma.room.findUnique({
+      where: { id: roomId },
+      select: { createdBy: true },
+    });
+    if (room && room.createdBy) {
+      hostId = room.createdBy;
+      if (userMap.has(hostId)) {
+        hostName = userMap.get(hostId);
+      } else {
+        const hostUser = await prisma.user.findUnique({
+          where: { id: hostId },
+          select: { name: true },
+        });
+        hostName = hostUser?.name || "Host";
+      }
+    }
+  } catch {
+    // DB lookup failed — still return the connected users
+  }
+
+  const users = Array.from(userMap.entries()).map(([id, name]) => ({
+    id,
+    name,
+    isHost: id === hostId,
+  }));
+
+  users.sort((a, b) => {
+    if (a.isHost && !b.isHost) return -1;
+    if (!a.isHost && b.isHost) return 1;
+    return a.name.localeCompare(b.name);
+  });
+
+  if (hostId && !userMap.has(hostId)) {
+    users.unshift({ id: hostId, name: hostName || "Host", isHost: true, isOffline: true });
+  }
+
+  return users;
+}
+
+/**
+ * Broadcast the current user list to everyone in the room.
+ */
+async function broadcastRoomUsers(io, roomId) {
+  const users = await getRoomUsers(io, roomId);
+  io.to(roomId).emit("users-updated", users);
 }
 
 module.exports = { initSockets };

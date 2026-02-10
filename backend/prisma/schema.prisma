@@ -14,22 +14,37 @@ model User {
   password  String
   createdAt DateTime @default(now()) @map("created_at")
 
-  songs Song[]
-  votes Vote[]
+  songs       Song[]
+  votes       Vote[]
+  roomMembers RoomMember[]
 
   @@map("users")
 }
 
 model Room {
-  id        String   @id @default(uuid()) @db.Uuid
-  name      String   @db.VarChar(100)
-  code      String   @unique @db.VarChar(8)
-  mode      String   @default("open") @db.VarChar(20)
-  createdBy String?  @map("created_by") @db.Uuid
-  createdAt DateTime @default(now()) @map("created_at")
+  id        String       @id @default(uuid()) @db.Uuid
+  name      String       @db.VarChar(100)
+  code      String       @unique @db.VarChar(8)
+  mode      String       @default("open") @db.VarChar(20)
+  createdBy String?      @map("created_by") @db.Uuid
+  createdAt DateTime     @default(now()) @map("created_at")
   songs     Song[]
+  members   RoomMember[]
 
   @@map("rooms")
+}
+
+model RoomMember {
+  id       String   @id @default(uuid()) @db.Uuid
+  roomId   String   @map("room_id") @db.Uuid
+  userId   String   @map("user_id") @db.Uuid
+  joinedAt DateTime @default(now()) @map("joined_at")
+
+  room Room @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([roomId, userId])
+  @@map("room_members")
 }
 
 model Song {

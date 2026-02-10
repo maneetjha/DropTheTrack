@@ -1,11 +1,9 @@
 const { Router } = require("express");
 const bcrypt = require("bcryptjs");
-const { OAuth2Client } = require("google-auth-library");
 const prisma = require("../config/db");
 const { generateToken, requireAuth } = require("../middleware/auth");
 
 const router = Router();
-const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 // Register
 router.post("/register", async (req, res) => {
@@ -77,22 +75,25 @@ router.post("/login", async (req, res) => {
   }
 });
 
-// Google OAuth
+// Google OAuth — accepts an access token from the popup flow
 router.post("/google", async (req, res) => {
   try {
-    const { credential } = req.body;
+    const { accessToken } = req.body;
 
-    if (!credential) {
-      return res.status(400).json({ error: "Google credential is required" });
+    if (!accessToken) {
+      return res.status(400).json({ error: "Google access token is required" });
     }
 
-    // Verify the Google ID token
-    const ticket = await googleClient.verifyIdToken({
-      idToken: credential,
-      audience: process.env.GOOGLE_CLIENT_ID,
+    // Fetch user info from Google using the access token
+    const googleRes = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
+      headers: { Authorization: `Bearer ${accessToken}` },
     });
 
-    const payload = ticket.getPayload();
+    if (!googleRes.ok) {
+      return res.status(401).json({ error: "Invalid Google access token" });
+    }
+
+    const payload = await googleRes.json();
     const { email, name, sub: googleId } = payload;
 
     if (!email) {

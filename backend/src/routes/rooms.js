@@ -1,8 +1,7 @@
 const { Router } = require("express");
 const crypto = require("crypto");
 const prisma = require("../config/db");
-const redis = require("../config/redis");
-const { requireAuth } = require("../middleware/auth");
+const { requireAuth, optionalAuth } = require("../middleware/auth");
 
 const router = Router();
 
@@ -17,6 +16,12 @@ router.post("/", requireAuth, async (req, res) => {
     const { name } = req.body;
     if (!name || name.trim().length === 0) {
       return res.status(400).json({ error: "Room name is required" });
+    }
+
+    // Cap at 5 rooms per user
+    const count = await prisma.room.count({ where: { createdBy: req.user.id } });
+    if (count >= 5) {
+      return res.status(400).json({ error: "You can have at most 5 rooms. Delete one to create a new one." });
     }
 
     // Generate unique code (retry if collision)
@@ -36,6 +41,14 @@ router.post("/", requireAuth, async (req, res) => {
         createdBy: req.user.id,
       },
     });
+
+    // Also add creator as a member
+    await prisma.roomMember.upsert({
+      where: { roomId_userId: { roomId: room.id, userId: req.user.id } },
+      update: { joinedAt: new Date() },
+      create: { roomId: room.id, userId: req.user.id },
+    });
+
     res.status(201).json(room);
   } catch (err) {
     console.error("[Rooms] Create error:", err);
@@ -43,30 +56,62 @@ router.post("/", requireAuth, async (req, res) => {
   }
 });
 
-// List all rooms (hides rooms that have been empty for >5 min)
-router.get("/", async (_req, res) => {
+// My rooms — rooms created by the current user (max 5)
+router.get("/mine", requireAuth, async (req, res) => {
   try {
     const rooms = await prisma.room.findMany({
+      where: { createdBy: req.user.id },
       orderBy: { createdAt: "desc" },
+      take: 5,
+    });
+    res.json(rooms);
+  } catch (err) {
+    console.error("[Rooms] My rooms error:", err);
+    res.status(500).json({ error: "Failed to fetch your rooms" });
+  }
+});
+
+// Recently joined rooms — last 10 rooms the user joined (excludes rooms they created)
+router.get("/recent", requireAuth, async (req, res) => {
+  try {
+    const memberships = await prisma.roomMember.findMany({
+      where: {
+        userId: req.user.id,
+        room: { createdBy: { not: req.user.id } },
+      },
+      orderBy: { joinedAt: "desc" },
+      take: 10,
+      include: {
+        room: true,
+      },
+    });
+    res.json(memberships.map((m) => m.room));
+  } catch (err) {
+    console.error("[Rooms] Recent rooms error:", err);
+    res.status(500).json({ error: "Failed to fetch recent rooms" });
+  }
+});
+
+// Track a room join (called when user enters a room)
+router.post("/:id/join", requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const room = await prisma.room.findUnique({ where: { id } });
+    if (!room) {
+      return res.status(404).json({ error: "Room not found" });
+    }
+
+    await prisma.roomMember.upsert({
+      where: { roomId_userId: { roomId: id, userId: req.user.id } },
+      update: { joinedAt: new Date() },
+      create: { roomId: id, userId: req.user.id },
     });
 
-    if (!redis) {
-      return res.json(rooms);
-    }
-
-    // Filter out rooms that are marked as empty (TTL key exists)
-    const filtered = [];
-    for (const room of rooms) {
-      const emptySince = await redis.get(`room:${room.id}:empty_since`);
-      if (!emptySince) {
-        filtered.push(room);
-      }
-    }
-
-    res.json(filtered);
+    res.json({ success: true });
   } catch (err) {
-    console.error("[Rooms] List error:", err);
-    res.status(500).json({ error: "Failed to fetch rooms" });
+    console.error("[Rooms] Join track error:", err);
+    res.status(500).json({ error: "Failed to track join" });
   }
 });
 

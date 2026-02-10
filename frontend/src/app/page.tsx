@@ -157,9 +157,6 @@ export default function Home() {
             </section>
 
             <section className="animate-fade-in-up-3">
-              <h2 className="mb-4 text-lg font-semibold text-[var(--text-light)]">
-                Active Rooms
-              </h2>
               <RoomList />
             </section>
           </div>

@@ -79,11 +79,11 @@ export async function login(email: string, password: string): Promise<AuthRespon
   return res.json();
 }
 
-export async function googleAuth(credential: string): Promise<AuthResponse> {
+export async function googleAuth(accessToken: string): Promise<AuthResponse> {
   const res = await fetch(`${API_URL}/auth/google`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ credential }),
+    body: JSON.stringify({ accessToken }),
   });
   if (!res.ok) {
     const data = await res.json();
@@ -109,14 +109,36 @@ export async function createRoom(name: string): Promise<Room> {
     headers: authHeaders(),
     body: JSON.stringify({ name }),
   });
-  if (!res.ok) throw new Error("Failed to create room");
+  if (!res.ok) {
+    const data = await res.json();
+    throw new Error(data.error || "Failed to create room");
+  }
   return res.json();
 }
 
-export async function getRooms(): Promise<Room[]> {
-  const res = await fetch(`${API_URL}/rooms`, { cache: "no-store" });
-  if (!res.ok) throw new Error("Failed to fetch rooms");
+export async function getMyRooms(): Promise<Room[]> {
+  const res = await fetch(`${API_URL}/rooms/mine`, {
+    headers: authHeaders(),
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error("Failed to fetch your rooms");
   return res.json();
+}
+
+export async function getRecentRooms(): Promise<Room[]> {
+  const res = await fetch(`${API_URL}/rooms/recent`, {
+    headers: authHeaders(),
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error("Failed to fetch recent rooms");
+  return res.json();
+}
+
+export async function trackRoomJoin(roomId: string): Promise<void> {
+  await fetch(`${API_URL}/rooms/${roomId}/join`, {
+    method: "POST",
+    headers: authHeaders(),
+  }).catch(() => {});
 }
 
 export async function getRoom(id: string): Promise<Room> {
@@ -211,6 +233,41 @@ export async function upvoteSong(songId: string): Promise<Song> {
   if (!res.ok) {
     if (res.status === 401) throw new Error("Login required");
     throw new Error("Failed to toggle vote");
+  }
+  return res.json();
+}
+
+export async function removeSong(songId: string): Promise<void> {
+  const res = await fetch(`${API_URL}/songs/${songId}`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+  if (!res.ok) {
+    const data = await res.json();
+    throw new Error(data.error || "Failed to remove song");
+  }
+}
+
+export async function playSong(songId: string): Promise<Song> {
+  const res = await fetch(`${API_URL}/songs/${songId}/play`, {
+    method: "POST",
+    headers: authHeaders(),
+  });
+  if (!res.ok) {
+    const data = await res.json();
+    throw new Error(data.error || "Failed to play song");
+  }
+  return res.json();
+}
+
+export async function skipSong(roomId: string): Promise<Song[]> {
+  const res = await fetch(`${API_URL}/rooms/${roomId}/songs/skip`, {
+    method: "POST",
+    headers: authHeaders(),
+  });
+  if (!res.ok) {
+    const data = await res.json();
+    throw new Error(data.error || "Failed to skip song");
   }
   return res.json();
 }
