@@ -1,11 +1,10 @@
 const { Router } = require("express");
+const yts = require("yt-search");
 const { requireAuth } = require("../middleware/auth");
 
 const router = Router();
 
-const YOUTUBE_API_URL = "https://www.googleapis.com/youtube/v3/search";
-
-// Search YouTube videos (protected — only logged-in users)
+// Search YouTube videos via yt-search (no API key needed, no quota)
 router.get("/search", requireAuth, async (req, res) => {
   try {
     const { q } = req.query;
@@ -14,35 +13,13 @@ router.get("/search", requireAuth, async (req, res) => {
       return res.status(400).json({ error: "Search query is required" });
     }
 
-    const apiKey = process.env.YOUTUBE_API_KEY;
-    if (!apiKey) {
-      console.error("[YouTube] YOUTUBE_API_KEY is not set");
-      return res.status(500).json({ error: "YouTube search is not configured" });
-    }
+    const data = await yts(q.trim());
 
-    const params = new URLSearchParams({
-      part: "snippet",
-      type: "video",
-      maxResults: "8",
-      q: q.trim(),
-      key: apiKey,
-    });
-
-    const response = await fetch(`${YOUTUBE_API_URL}?${params}`);
-
-    if (!response.ok) {
-      const error = await response.json();
-      console.error("[YouTube] API error:", error);
-      return res.status(502).json({ error: "YouTube search failed" });
-    }
-
-    const data = await response.json();
-
-    const results = (data.items || []).map((item) => ({
-      videoId: item.id.videoId,
-      title: item.snippet.title,
-      thumbnail: item.snippet.thumbnails?.medium?.url || item.snippet.thumbnails?.default?.url || null,
-      channelTitle: item.snippet.channelTitle,
+    const results = (data.videos || []).slice(0, 8).map((v) => ({
+      videoId: v.videoId,
+      title: v.title,
+      thumbnail: v.thumbnail || `https://i.ytimg.com/vi/${v.videoId}/mqdefault.jpg`,
+      channelTitle: v.author?.name || "",
     }));
 
     res.json(results);

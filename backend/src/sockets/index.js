@@ -108,6 +108,36 @@ function initSockets(io) {
       console.log(`[Socket] Host ${isPaused ? "paused" : "resumed"} in room ${roomId} at ${currentTime.toFixed(1)}s`);
     });
 
+    // Chat message — persist to DB and broadcast to room
+    socket.on("chat-message", async ({ roomId, text }) => {
+      const userId = socket.data.userId;
+      const userName = socket.data.userName;
+
+      if (!roomId || !text || !text.trim() || !userId || userId.startsWith("anon-")) return;
+
+      const trimmed = text.trim().slice(0, 500);
+
+      try {
+        const message = await prisma.message.create({
+          data: {
+            roomId,
+            userId,
+            text: trimmed,
+          },
+        });
+
+        io.to(roomId).emit("new-message", {
+          id: message.id,
+          text: message.text,
+          userId,
+          userName: userName || "Unknown",
+          createdAt: message.createdAt,
+        });
+      } catch (err) {
+        console.error("[Socket] Chat message save failed:", err);
+      }
+    });
+
     // Disconnect — clean up
     socket.on("disconnect", async () => {
       const { roomId } = socket.data;

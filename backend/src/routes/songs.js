@@ -197,6 +197,38 @@ router.post("/songs/:songId/play", requireAuth, async (req, res) => {
   }
 });
 
+// Clear entire queue — deletes all non-playing songs (host only)
+router.delete("/:roomId/songs/clear", requireAuth, async (req, res) => {
+  try {
+    const { roomId } = req.params;
+
+    const room = await prisma.room.findUnique({ where: { id: roomId } });
+    if (!room) {
+      return res.status(404).json({ error: "Room not found" });
+    }
+    if (room.createdBy !== req.user.id) {
+      return res.status(403).json({ error: "Only the host can clear the queue" });
+    }
+
+    // Delete all votes on non-playing songs in this room first
+    await prisma.vote.deleteMany({
+      where: {
+        song: { roomId, isPlaying: false, played: false },
+      },
+    });
+
+    // Delete all non-playing, non-played songs
+    const deleted = await prisma.song.deleteMany({
+      where: { roomId, isPlaying: false, played: false },
+    });
+
+    res.json({ success: true, deleted: deleted.count });
+  } catch (err) {
+    console.error("[Songs] Clear queue error:", err);
+    res.status(500).json({ error: "Failed to clear queue" });
+  }
+});
+
 // Skip current song — marks it as played and plays the next one (host only)
 router.post("/:roomId/songs/skip", requireAuth, async (req, res) => {
   try {

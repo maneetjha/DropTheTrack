@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import {
-  getRoom, getSongs, addSong, upvoteSong, removeSong, playSong, skipSong,
+  getRoom, getSongs, addSong, upvoteSong, removeSong, playSong, skipSong, clearQueue,
   deleteRoom, updateRoomMode, searchYouTube, trackRoomJoin,
   Room, Song, YouTubeResult,
 } from "@/lib/api";
@@ -13,20 +13,22 @@ import { getSocket } from "@/lib/socket";
 import { useAuth } from "@/lib/auth-context";
 import Navbar from "@/components/Navbar";
 import YouTubePlayer, { PlaybackState } from "@/components/YouTubePlayer";
+import RoomChat from "@/components/RoomChat";
+import {
+  ChevronLeft, Copy, Check, MoreVertical, Search, X, Music,
+  ChevronUp, Trash2, Play, Lock, Unlock, LogOut, ListMusic, Disc3, MessageCircle,
+} from "lucide-react";
 
-interface RoomUser {
-  id: string;
-  name: string;
-  isHost?: boolean;
-  isOffline?: boolean;
-}
+interface RoomUser { id: string; name: string; isHost?: boolean; isOffline?: boolean; }
 
-// ---- Media query hook (SSR-safe) ----
-const LG_QUERY = "(min-width: 1024px)";
-function subscribeToMedia(cb: () => void) { const m = window.matchMedia(LG_QUERY); m.addEventListener("change", cb); return () => m.removeEventListener("change", cb); }
-function getIsDesktop() { return typeof window !== "undefined" && window.matchMedia(LG_QUERY).matches; }
-function getIsDesktopServer() { return false; }
-function useIsDesktop() { return useSyncExternalStore(subscribeToMedia, getIsDesktop, getIsDesktopServer); }
+// ---- Media query hooks (SSR-safe) ----
+const LG = "(min-width: 1024px)";
+const MD = "(min-width: 768px)";
+function sub(q: string) { return (cb: () => void) => { const m = window.matchMedia(q); m.addEventListener("change", cb); return () => m.removeEventListener("change", cb); }; }
+function snap(q: string) { return () => typeof window !== "undefined" && window.matchMedia(q).matches; }
+function ssrFalse() { return false; }
+function useIsDesktop() { return useSyncExternalStore(sub(LG), snap(LG), ssrFalse); }
+function useIsTablet() { return useSyncExternalStore(sub(MD), snap(MD), ssrFalse); }
 
 function extractVideoId(url: string): string | null {
   const m = url.match(/(?:v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
@@ -38,6 +40,7 @@ export default function RoomPage() {
   const router = useRouter();
   const { user, loading: authLoading } = useAuth();
   const isDesktop = useIsDesktop();
+  const isTablet = useIsTablet();
 
   const [room, setRoom] = useState<Room | null>(null);
   const [songs, setSongs] = useState<Song[]>([]);
@@ -47,9 +50,13 @@ export default function RoomPage() {
   const [showUsers, setShowUsers] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [mobileTab, setMobileTab] = useState<"queue" | "player">("queue");
+  const [mobileTab, setMobileTab] = useState<"queue" | "player" | "chat">("queue");
   const [syncState, setSyncState] = useState<PlaybackState | null>(null);
   const [modal, setModal] = useState<{ title: string; message: string; type: "info" | "error" | "confirm"; onConfirm?: () => void } | null>(null);
+  const [connectionStatus, setConnectionStatus] = useState<"connected" | "reconnecting" | "disconnected">("connected");
+  const [showChatSlide, setShowChatSlide] = useState(false);
+  const [unreadChat, setUnreadChat] = useState(0);
+  const [chatCollapsed, setChatCollapsed] = useState(false);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<YouTubeResult[]>([]);
@@ -60,6 +67,7 @@ export default function RoomPage() {
   const usersRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
+  // ---- Click-outside ----
   useEffect(() => {
     function h(e: MouseEvent) {
       if (showUsers && usersRef.current && !usersRef.current.contains(e.target as Node)) setShowUsers(false);
@@ -70,29 +78,56 @@ export default function RoomPage() {
     return () => document.removeEventListener("mousedown", h);
   }, [showUsers, showMenu, searchResults.length]);
 
+  // ---- Data fetching ----
   const fetchSongs = useCallback(async () => { if (!id) return; try { setSongs(await getSongs(id)); } catch (e) { console.error(e); } }, [id]);
-
   useEffect(() => { if (!id) return; (async () => { try { const [r, s] = await Promise.all([getRoom(id), getSongs(id)]); setRoom(r); setSongs(s); } catch (e) { console.error(e); } finally { setLoading(false); } })(); }, [id]);
   useEffect(() => { if (!id || authLoading || !user) return; trackRoomJoin(id); }, [id, authLoading, user]);
 
+  // ---- Socket ----
   useEffect(() => {
     if (!id || authLoading) return;
     const socket = getSocket(); socket.connect();
-    const onConnect = () => { socket.emit("join-room", { roomId: id, userId: user?.id || `anon-${socket.id}`, userName: user?.name || "Anonymous" }); };
+    const onConnect = () => { setConnectionStatus("connected"); socket.emit("join-room", { roomId: id, userId: user?.id || `anon-${socket.id}`, userName: user?.name || "Anonymous" }); };
+    const onDisconnect = () => { setConnectionStatus("reconnecting"); };
+    const onReconnectAttempt = () => { setConnectionStatus("reconnecting"); };
+    const onReconnectFailed = () => { setConnectionStatus("disconnected"); };
+    const onConnectError = () => { setConnectionStatus("reconnecting"); };
     if (socket.connected) onConnect(); else socket.on("connect", onConnect);
+    socket.on("disconnect", onDisconnect);
+    socket.on("reconnect_attempt", onReconnectAttempt);
+    socket.on("reconnect_failed", onReconnectFailed);
+    socket.on("connect_error", onConnectError);
     socket.on("queue-updated", () => { getSongs(id).then(setSongs).catch(console.error); });
     socket.on("users-updated", (u: RoomUser[]) => setUsers(u));
     socket.on("room-updated", (d: { room: Room }) => { if (d.room) setRoom(d.room); });
     socket.on("playback-sync", (s: PlaybackState) => { setSyncState(s); });
-    return () => { socket.emit("leave-room", id); socket.off("connect", onConnect); socket.off("queue-updated"); socket.off("users-updated"); socket.off("room-updated"); socket.off("playback-sync"); socket.disconnect(); };
+    socket.on("room-deleted", () => { socket.disconnect(); router.push("/"); });
+    return () => {
+      socket.emit("leave-room", id);
+      socket.off("connect", onConnect); socket.off("disconnect", onDisconnect);
+      socket.off("reconnect_attempt", onReconnectAttempt); socket.off("reconnect_failed", onReconnectFailed);
+      socket.off("connect_error", onConnectError);
+      socket.off("queue-updated"); socket.off("users-updated"); socket.off("room-updated"); socket.off("playback-sync"); socket.off("room-deleted");
+      socket.disconnect();
+    };
   }, [id, authLoading, user, fetchSongs]);
 
-  useEffect(() => { if (!isDesktop && songs.some((s) => s.isPlaying)) setMobileTab("player"); }, [songs, isDesktop]);
+  useEffect(() => { if (!isDesktop && !isTablet && songs.some((s) => s.isPlaying)) setMobileTab("player"); }, [songs, isDesktop, isTablet]);
+
+  // Track unread chat messages on mobile when not on chat tab
+  useEffect(() => {
+    if (isDesktop) return;
+    const socket = getSocket();
+    const onMsg = () => { if (mobileTab !== "chat" && !showChatSlide) setUnreadChat((c) => c + 1); };
+    socket.on("new-message", onMsg);
+    return () => { socket.off("new-message", onMsg); };
+  }, [isDesktop, mobileTab, showChatSlide]);
 
   // ---- Handlers ----
   const handleSearchChange = (v: string) => { setSearchQuery(v); if (debounceRef.current) clearTimeout(debounceRef.current); if (!v.trim()) { setSearchResults([]); setSearching(false); return; } setSearching(true); debounceRef.current = setTimeout(async () => { try { setSearchResults(await searchYouTube(v.trim())); } catch { setSearchResults([]); } finally { setSearching(false); } }, 300); };
-  const handleSelectResult = async (r: YouTubeResult) => { if (!id) return; setAddingVideoId(r.videoId); try { const t = r.title.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'"); const s = await addSong(id, { title: t, url: `https://www.youtube.com/watch?v=${r.videoId}`, thumbnail: r.thumbnail || undefined }); setSongs((p) => [...p, s].sort((a, b) => b.upvotes - a.upvotes)); setSearchQuery(""); setSearchResults([]); getSocket().emit("song-added", { roomId: id, song: s }); } catch { setModal({ title: "Oops", message: "Failed to add song.", type: "error" }); } finally { setAddingVideoId(null); } };
-  const handleUpvote = async (songId: string) => { if (!user) { setModal({ title: "Login required", message: "Please log in to vote.", type: "info" }); return; } setSongs((p) => p.map((s) => s.id !== songId ? s : { ...s, hasVoted: !s.hasVoted, upvotes: s.hasVoted ? s.upvotes - 1 : s.upvotes + 1 }).sort((a, b) => b.upvotes - a.upvotes)); try { const u = await upvoteSong(songId); setSongs((p) => p.map((s) => (s.id === songId ? u : s)).sort((a, b) => b.upvotes - a.upvotes)); getSocket().emit("song-upvoted", { roomId: id, songId, upvotes: u.upvotes }); } catch (e: unknown) { fetchSongs(); if (e instanceof Error && e.message === "Login required") setModal({ title: "Login required", message: "Please log in to vote.", type: "info" }); } };
+  const sortSongs = (list: Song[]) => [...list].sort((a, b) => b.upvotes - a.upvotes || new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+  const handleSelectResult = async (r: YouTubeResult) => { if (!id) return; setAddingVideoId(r.videoId); try { const t = r.title.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'"); const s = await addSong(id, { title: t, url: `https://www.youtube.com/watch?v=${r.videoId}`, thumbnail: r.thumbnail || undefined }); setSongs((p) => sortSongs([...p, s])); setSearchQuery(""); setSearchResults([]); getSocket().emit("song-added", { roomId: id, song: s }); } catch { setModal({ title: "Oops", message: "Failed to add song.", type: "error" }); } finally { setAddingVideoId(null); } };
+  const handleUpvote = async (songId: string) => { if (!user) { setModal({ title: "Login required", message: "Please log in to vote.", type: "info" }); return; } setSongs((p) => sortSongs(p.map((s) => s.id !== songId ? s : { ...s, hasVoted: !s.hasVoted, upvotes: s.hasVoted ? s.upvotes - 1 : s.upvotes + 1 }))); try { const u = await upvoteSong(songId); setSongs((p) => sortSongs(p.map((s) => (s.id === songId ? u : s)))); getSocket().emit("song-upvoted", { roomId: id, songId, upvotes: u.upvotes }); } catch (e: unknown) { fetchSongs(); if (e instanceof Error && e.message === "Login required") setModal({ title: "Login required", message: "Please log in to vote.", type: "info" }); } };
   const handleRemoveSong = async (songId: string) => { try { await removeSong(songId); setSongs((p) => p.filter((s) => s.id !== songId)); getSocket().emit("song-removed", { roomId: id, songId }); } catch (e) { setModal({ title: "Error", message: e instanceof Error ? e.message : "Failed to remove", type: "error" }); } };
   const handlePlaySong = async (songId: string) => { if (!id) return; try { await playSong(songId); await fetchSongs(); getSocket().emit("playback-changed", { roomId: id }); } catch (e) { setModal({ title: "Error", message: e instanceof Error ? e.message : "Failed to play", type: "error" }); } };
   const handleSkipSong = useCallback(async () => { if (!id) return; try { const u = await skipSong(id); setSongs(u); getSocket().emit("playback-changed", { roomId: id }); } catch (e) { console.error("Skip failed:", e); } }, [id]);
@@ -102,6 +137,7 @@ export default function RoomPage() {
   const handleDeleteRoom = () => { if (!id) return; setShowMenu(false); setModal({ title: "Delete room?", message: "This will permanently delete the room and all its songs.", type: "confirm", onConfirm: async () => { setModal(null); setDeleting(true); try { await deleteRoom(id); router.push("/"); } catch (e) { setModal({ title: "Error", message: e instanceof Error ? e.message : "Failed", type: "error" }); setDeleting(false); } } }); };
   const handleLeaveRoom = () => { const s = getSocket(); if (id) s.emit("leave-room", id); s.disconnect(); router.push("/"); };
   const handleToggleMode = async () => { if (!id || !room) return; const m = room.mode === "open" ? "listen_only" : "open"; try { const u = await updateRoomMode(id, m); setRoom(u); setShowMenu(false); getSocket().emit("room-updated", { roomId: id, room: u }); } catch (e) { setModal({ title: "Error", message: e instanceof Error ? e.message : "Failed", type: "error" }); } };
+  const handleClearQueue = () => { if (!id) return; setModal({ title: "Clear queue?", message: "This will remove all upcoming songs from the queue.", type: "confirm", onConfirm: async () => { setModal(null); try { await clearQueue(id); setSongs((p) => p.filter((s) => s.isPlaying)); getSocket().emit("song-removed", { roomId: id }); } catch (e) { setModal({ title: "Error", message: e instanceof Error ? e.message : "Failed to clear", type: "error" }); } } }); };
 
   // ---- Derived ----
   const isCreator = !!(user && room && room.createdBy === user.id);
@@ -112,274 +148,414 @@ export default function RoomPage() {
   const queue = songs.filter((s) => !s.isPlaying);
   const currentVideoId = nowPlaying ? extractVideoId(nowPlaying.url) : null;
 
-  if (loading) return (<div className="min-h-screen bg-[var(--bg-dark)]"><Navbar /><div className="flex items-center justify-center py-32"><div className="h-10 w-10 animate-spin rounded-full border-2 border-[var(--primary)] border-t-transparent" /></div></div>);
-  if (!room) return (<div className="min-h-screen bg-[var(--bg-dark)]"><Navbar /><div className="mx-auto max-w-2xl px-4 pt-28 text-center"><h2 className="font-display text-2xl text-[var(--text-light)]">Room not found</h2><p className="mt-2 text-[var(--text-muted)]">This room might not exist or the backend isn&apos;t running.</p><Link href="/" className="btn-ripple mt-6 inline-block rounded-full bg-gradient-to-br from-[var(--primary)] to-[var(--primary-dark)] px-6 py-3 font-semibold text-white transition-all hover:-translate-y-0.5">Back to Home</Link></div></div>);
+  // ---- Loading / Not found ----
+  if (loading) return (
+    <div className="flex h-screen flex-col bg-[var(--background)]">
+      <Navbar />
+      <div className="flex flex-1 items-center justify-center">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-[var(--brand)] border-t-transparent" />
+      </div>
+    </div>
+  );
+  if (!room) return (
+    <div className="flex h-screen flex-col bg-[var(--background)]">
+      <Navbar />
+      <div className="flex flex-1 flex-col items-center justify-center px-4 text-center">
+        <h2 className="font-display text-2xl font-bold text-[var(--text-primary)]">Room not found</h2>
+        <p className="mt-2 text-sm text-[var(--text-secondary)]">This room might not exist or the backend isn&apos;t running.</p>
+        <Link href="/" className="mt-6 rounded-lg bg-[var(--brand)] px-5 py-2.5 text-sm font-semibold text-white transition hover:brightness-110">Back to Home</Link>
+      </div>
+    </div>
+  );
 
-  // ==============================================================
-  // ROOM HEADER
-  // ==============================================================
-  const headerJSX = (
-    <div className="relative z-20 mb-8">
-      <button onClick={handleLeaveRoom} className="mb-3 inline-flex items-center gap-1.5 text-sm text-[var(--text-muted)] transition hover:text-[var(--primary)]">
-        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" /></svg>
-        Leave room
-      </button>
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <div className="flex items-center gap-3">
-            <h1 className="truncate font-display text-3xl font-bold text-[var(--text-light)]">{room.name}</h1>
-            {isListenOnly && <span className="shrink-0 rounded-full bg-amber-500/10 px-2.5 py-0.5 text-[10px] font-medium text-amber-400 border border-amber-500/20">Listen only</span>}
-          </div>
-          <div className="mt-2 flex flex-wrap items-center gap-3 text-sm text-[var(--text-muted)]">
-            <span>{songs.length} song{songs.length !== 1 ? "s" : ""}</span>
-            <span className="text-white/10">|</span>
-            <div className="relative" ref={usersRef}>
-              <button onClick={() => setShowUsers(!showUsers)} className="flex items-center gap-1.5 transition hover:text-[var(--text-light)]">
-                <span className="h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.5)]" />
-                {users.length} online
-                <svg className={`h-3 w-3 transition ${showUsers ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" /></svg>
+  // ==================================================================
+  // QUEUE PANEL CONTENT
+  // ==================================================================
+  const queuePanelContent = (
+    <div className="flex h-full flex-col">
+      {/* Room Info */}
+      <section className="shrink-0 p-5 pb-0">
+        {/* Row 1: Room name + code & menu on the right */}
+        <div className="flex items-start justify-between gap-3">
+          <h1 className="font-display text-[32px] font-bold leading-tight text-[var(--text-primary)]">{room.name}</h1>
+          <div className="flex shrink-0 items-center gap-2 pt-1">
+            {/* Room code pill */}
+            <div className="relative">
+              <button onClick={() => { navigator.clipboard.writeText(room.code); setCopied(true); setTimeout(() => setCopied(false), 2000); }} className="flex items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-hover)] px-2.5 py-1.5 text-[12px] transition hover:border-[var(--brand)]">
+                <span className="font-mono font-bold tracking-widest text-[var(--brand)]">{room.code}</span>
+                {copied ? <Check className="h-3 w-3 text-[var(--success)]" /> : <Copy className="h-3 w-3 text-[var(--text-muted)]" />}
               </button>
-              {showUsers && (
-                <div className="absolute left-0 top-full z-50 mt-2 w-56 overflow-hidden rounded-2xl border border-white/[0.08] bg-[#1a1a2e]/95 backdrop-blur-xl shadow-2xl">
-                  <div className="border-b border-white/5 px-4 py-2.5"><p className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">People in room</p></div>
-                  <div className="max-h-60 overflow-y-auto p-2">
-                    {users.length === 0 ? <p className="py-3 text-center text-xs text-[var(--text-muted)]">No one here yet</p> : users.map((u) => (
-                      <div key={u.id} className={`flex items-center gap-2.5 rounded-xl px-3 py-2 ${u.isOffline ? "opacity-30" : ""}`}>
-                        <div className="relative shrink-0">
-                          <div className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold text-white ${u.isHost ? "bg-amber-500" : "bg-[var(--primary)]"}`}>{u.name.charAt(0).toUpperCase()}</div>
-                          {!u.isOffline && <span className="absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full border-[1.5px] border-[#1a1a2e] bg-emerald-400" />}
-                        </div>
-                        <span className="truncate text-sm font-medium text-white/90">{u.name}</span>
-                        <div className="ml-auto flex shrink-0 items-center gap-1.5">
-                          {u.isHost && <span className="rounded-md bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-bold uppercase text-amber-400">host</span>}
-                          {user && u.id === user.id && <span className="rounded-md bg-white/5 px-1.5 py-0.5 text-[9px] font-medium text-white/40">you</span>}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+              {copied && <span className="absolute -top-7 left-1/2 -translate-x-1/2 rounded-md bg-[var(--success)] px-2 py-0.5 text-[10px] font-semibold text-white whitespace-nowrap animate-fade-in-up">Copied!</span>}
+            </div>
+            {/* Kebab menu */}
+            <div className="relative" ref={menuRef}>
+              <button onClick={() => setShowMenu(!showMenu)} className="flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--border)] transition hover:bg-[var(--surface-hover)]">
+                <MoreVertical className="h-4 w-4 text-[var(--text-muted)]" />
+              </button>
+              {showMenu && (
+                <div className="absolute right-0 top-full z-50 mt-2 w-52 rounded-xl border border-[var(--border)] bg-[var(--surface)] py-1.5 shadow-2xl">
+                  {isCreator && (<>
+                    <button onClick={handleToggleMode} className="flex w-full items-center gap-3 px-4 py-2 text-left text-sm text-[var(--text-primary)] transition hover:bg-[var(--surface-hover)]">
+                      {isListenOnly ? <><Unlock className="h-4 w-4 text-[var(--success)]" /><span>Open to all</span></> : <><Lock className="h-4 w-4 text-amber-400" /><span>Listen only</span></>}
+                    </button>
+                    <div className="mx-3 my-1 border-t border-[var(--border)]" />
+                    <button onClick={handleDeleteRoom} disabled={deleting} className="flex w-full items-center gap-3 px-4 py-2 text-left text-sm text-[var(--danger)] transition disabled:opacity-50 hover:bg-red-500/5">
+                      <Trash2 className="h-4 w-4" />{deleting ? "Deleting..." : "Delete room"}
+                    </button>
+                    <div className="mx-3 my-1 border-t border-[var(--border)]" />
+                  </>)}
+                  <button onClick={handleLeaveRoom} className="flex w-full items-center gap-3 px-4 py-2 text-left text-sm text-orange-400 transition hover:bg-orange-500/5">
+                    <LogOut className="h-4 w-4" />Leave room
+                  </button>
                 </div>
               )}
             </div>
           </div>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <button onClick={() => { navigator.clipboard.writeText(room.code); setCopied(true); setTimeout(() => setCopied(false), 2000); }} className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-2 transition-all hover:border-[var(--primary)]/40 hover:bg-[rgba(107,90,237,0.08)]">
-            <span className="font-mono text-sm font-bold tracking-widest text-[var(--primary)]">{room.code}</span>
-            <svg className="h-3.5 w-3.5 text-[var(--text-muted)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>{copied ? <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /> : <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />}</svg>
-          </button>
-          <div className="relative" ref={menuRef}>
-            <button onClick={() => setShowMenu(!showMenu)} className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-white/5 transition-all hover:border-white/20 hover:bg-white/10">
-              <svg className="h-5 w-5 text-[var(--text-muted)]" fill="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.5" /><circle cx="12" cy="12" r="1.5" /><circle cx="12" cy="19" r="1.5" /></svg>
+
+        {/* Row 2: Metadata */}
+        <div className="mt-3 flex flex-wrap items-center gap-4 text-[14px] text-[var(--text-secondary)]">
+          <span>{songs.length} song{songs.length !== 1 ? "s" : ""}</span>
+          <div className="relative" ref={usersRef}>
+            <button onClick={() => setShowUsers(!showUsers)} className="flex items-center gap-1.5 transition hover:text-[var(--text-primary)]">
+              <span className="online-dot relative h-2 w-2 rounded-full bg-[var(--success)]" />
+              {users.length} online
             </button>
-            {showMenu && (
-              <div className="absolute right-0 top-full z-50 mt-2 w-52 rounded-2xl border border-white/10 bg-[var(--bg-darker)] py-2 shadow-2xl">
-                {isCreator && (<>
-                  <button onClick={handleToggleMode} className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-[var(--text-light)] transition hover:bg-white/5">
-                    {isListenOnly ? (<><svg className="h-4 w-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg><span>Open to all</span></>) : (<><svg className="h-4 w-4 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg><span>Listen only</span></>)}
-                  </button>
-                  <div className="mx-3 my-1 border-t border-white/5" />
-                  <button onClick={handleDeleteRoom} disabled={deleting} className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-red-400 transition hover:bg-red-500/5 disabled:opacity-50">
-                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                    {deleting ? "Deleting..." : "Delete room"}
-                  </button>
-                  <div className="mx-3 my-1 border-t border-white/5" />
-                </>)}
-                <button onClick={handleLeaveRoom} className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-orange-400 transition hover:bg-orange-500/5">
-                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
-                  Leave room
-                </button>
+            {showUsers && (
+              <div className="absolute left-0 top-full z-50 mt-2 w-60 overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-2xl">
+                <div className="border-b border-[var(--border)] px-4 py-2.5"><p className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">People in room</p></div>
+                <div className="max-h-60 overflow-y-auto p-2">
+                  {users.length === 0 ? <p className="py-3 text-center text-xs text-[var(--text-muted)]">No one here yet</p> : users.map((u) => (
+                    <div key={u.id} className={`flex items-center gap-2.5 rounded-xl px-3 py-2 ${u.isOffline ? "opacity-30" : ""}`}>
+                      <div className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white ${u.isHost ? "bg-amber-500" : "bg-[var(--brand)]"}`}>{u.name.charAt(0).toUpperCase()}</div>
+                      <span className="truncate text-sm font-medium text-[var(--text-primary)]">{u.name}</span>
+                      <div className="ml-auto flex shrink-0 gap-1.5">
+                        {u.isHost && <span className="rounded-md bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-bold uppercase text-amber-400">host</span>}
+                        {user && u.id === user.id && <span className="rounded-md bg-white/5 px-1.5 py-0.5 text-[9px] font-medium text-[var(--text-muted)]">you</span>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
           </div>
+          {isListenOnly && <span className="rounded-full bg-amber-500/10 px-2.5 py-0.5 text-[12px] font-medium text-amber-400 border border-amber-500/20">Listen only</span>}
         </div>
-      </div>
-    </div>
-  );
+      </section>
 
-  // ==============================================================
-  // SEARCH
-  // ==============================================================
-  const searchJSX = canAddSongs ? (
-    <div className="relative z-10 mb-8" ref={searchRef}>
-      <div className="relative">
-        <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-4">
-          {searching ? <div className="h-4 w-4 animate-spin rounded-full border-2 border-[var(--primary)] border-t-transparent" /> : <svg className="h-5 w-5 text-[var(--text-muted)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>}
-        </div>
-        <input type="text" value={searchQuery} onChange={(e) => handleSearchChange(e.target.value)} placeholder="Search YouTube for a song..." className="w-full rounded-2xl border border-white/10 bg-white/[0.03] py-3.5 pl-12 pr-10 text-[var(--text-light)] placeholder-[var(--text-muted)] outline-none transition focus:border-[var(--primary)]/50 focus:bg-white/[0.05] focus:ring-2 focus:ring-[rgba(107,90,237,0.15)]" />
-        {searchQuery && <button onClick={() => { setSearchQuery(""); setSearchResults([]); }} className="absolute inset-y-0 right-0 flex items-center pr-4 text-[var(--text-muted)] hover:text-[var(--text-light)]"><svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg></button>}
-      </div>
-      {searchResults.length > 0 && (
-        <div className="mt-3 space-y-1 rounded-2xl border border-white/5 bg-[var(--bg-darker)]/80 backdrop-blur-xl p-2">
-          {searchResults.map((r) => (
-            <div key={r.videoId} className="flex items-center gap-3 rounded-xl p-2 transition-all hover:bg-white/[0.04]">
-              {r.thumbnail && <div className="relative h-12 w-20 shrink-0 overflow-hidden rounded-lg"><Image src={r.thumbnail} alt={r.title} fill className="object-cover" unoptimized /></div>}
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium text-[var(--text-light)]" dangerouslySetInnerHTML={{ __html: r.title }} />
-                <p className="truncate text-xs text-[var(--text-muted)]">{r.channelTitle}</p>
+      {/* Search */}
+      <section className="shrink-0 px-5 pt-5">
+        {canAddSongs ? (
+          <div className="relative" ref={searchRef}>
+            <div className="relative">
+              <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
+                {searching ? <div className="h-4 w-4 animate-spin rounded-full border-2 border-[var(--brand)] border-t-transparent" /> : <Search className="h-4 w-4 text-[var(--text-muted)]" />}
               </div>
-              <button onClick={() => handleSelectResult(r)} disabled={addingVideoId === r.videoId} className="shrink-0 rounded-xl bg-[var(--primary)] px-5 py-2 text-xs font-semibold text-white transition-all hover:bg-[var(--primary-dark)] active:scale-95 disabled:opacity-50">
-                {addingVideoId === r.videoId ? "Adding..." : "+ Add"}
-              </button>
+              <input type="text" value={searchQuery} onChange={(e) => handleSearchChange(e.target.value)} placeholder="Search YouTube for a song..." className="h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] pl-10 pr-9 text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] outline-none transition focus:border-[var(--brand)] focus:shadow-[0_0_0_3px_var(--brand-glow)]" />
+              {searchQuery && <button onClick={() => { setSearchQuery(""); setSearchResults([]); }} className="absolute inset-y-0 right-0 flex items-center pr-3 text-[var(--text-muted)] hover:text-[var(--text-primary)]"><X className="h-4 w-4" /></button>}
             </div>
-          ))}
-        </div>
-      )}
-      {searchQuery && !searching && searchResults.length === 0 && <p className="mt-3 text-center text-sm text-[var(--text-muted)]">No results found. Try different keywords.</p>}
-    </div>
-  ) : user && isListenOnly ? (
-    <div className="mb-8 flex items-center gap-3 rounded-2xl border border-amber-500/10 bg-amber-500/5 px-5 py-4">
-      <svg className="h-5 w-5 shrink-0 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
-      <p className="text-sm text-amber-200/80"><span className="font-semibold text-amber-400">Listen-only</span> mode. Only the host can add songs.</p>
-    </div>
-  ) : !user ? (
-    <div className="mb-8 rounded-2xl border border-white/5 bg-white/[0.02] p-6 text-center">
-      <p className="text-[var(--text-muted)]"><Link href="/login" className="font-medium text-[var(--primary)] hover:underline">Log in</Link> or <Link href="/register" className="font-medium text-[var(--primary)] hover:underline">sign up</Link> to add songs and vote</p>
-    </div>
-  ) : null;
+            {searchResults.length > 0 && (
+              <div className="absolute left-0 right-0 top-full z-30 mt-2 max-h-80 space-y-1 overflow-y-auto rounded-xl border border-[var(--border)] bg-[var(--surface)] p-1.5 shadow-2xl">
+                {searchResults.map((r) => (
+                  <div key={r.videoId} className="flex items-center gap-3 rounded-lg p-2 transition hover:bg-[var(--surface-hover)]">
+                    {r.thumbnail && <div className="relative h-10 w-16 shrink-0 overflow-hidden rounded-lg"><Image src={r.thumbnail} alt={r.title} fill className="object-cover" unoptimized /></div>}
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-[13px] font-medium text-[var(--text-primary)]" dangerouslySetInnerHTML={{ __html: r.title }} />
+                      <p className="truncate text-[11px] text-[var(--text-muted)]">{r.channelTitle}</p>
+                    </div>
+                    <button onClick={() => handleSelectResult(r)} disabled={addingVideoId === r.videoId} className="shrink-0 rounded-lg bg-[var(--brand)] px-3.5 py-1.5 text-xs font-semibold text-white transition hover:brightness-110 active:scale-[0.97] disabled:opacity-50">
+                      {addingVideoId === r.videoId ? "..." : "+ Add"}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        ) : user && isListenOnly ? (
+          <div className="flex items-center gap-3 rounded-xl border border-amber-500/10 bg-amber-500/5 px-4 py-3">
+            <Lock className="h-4 w-4 shrink-0 text-amber-400" />
+            <p className="text-[13px] text-amber-200/80"><span className="font-semibold text-amber-400">Listen-only</span> mode.</p>
+          </div>
+        ) : !user ? (
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 text-center">
+            <p className="text-[13px] text-[var(--text-secondary)]"><Link href="/login" className="font-medium text-[var(--brand)] hover:underline">Log in</Link> to add songs and vote</p>
+          </div>
+        ) : null}
+      </section>
 
-  // ==============================================================
-  // QUEUE — the main redesign
-  // ==============================================================
-  const queueJSX = (
-    <div>
-      <div className="mb-4 flex items-center justify-between">
-        <h2 className="text-lg font-bold text-[var(--text-light)]">Up Next</h2>
-        {isCreator && songs.length > 0 && !nowPlaying && (
-          <button onClick={() => queue[0] && handlePlaySong(queue[0].id)} className="flex items-center gap-2 rounded-xl bg-gradient-to-br from-[var(--primary)] to-[var(--primary-dark)] px-5 py-2.5 text-sm font-semibold text-white transition-all hover:-translate-y-0.5 hover:shadow-lg hover:shadow-[var(--primary)]/20 active:scale-95">
-            <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
-            Start Playing
-          </button>
-        )}
-      </div>
-      {queue.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-white/10 py-16 text-center">
-          <svg className="mx-auto mb-3 h-10 w-10 text-white/10" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}><path strokeLinecap="round" strokeLinejoin="round" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" /></svg>
-          <p className="text-sm text-[var(--text-muted)]">{nowPlaying ? "Queue is empty. Add more songs!" : canAddSongs ? "No songs yet. Search above to add one!" : user ? "Waiting for the host to add songs." : "Log in to add songs!"}</p>
-        </div>
-      ) : (
-        <div className="space-y-2">
-          {queue.map((song, idx) => {
-            const canRemove = isCreator || (user && song.userId === user.id);
-            const isMine = user && song.userId === user.id;
-            return (
-              <div key={song.id} className={`group relative flex items-center gap-4 rounded-2xl border-l-[3px] border p-3 transition-all duration-200 ${isMine ? "border-l-[var(--primary)] border-y-[var(--primary)]/20 border-r-[var(--primary)]/20 bg-[rgba(107,90,237,0.1)] shadow-[inset_0_0_20px_rgba(107,90,237,0.06)] hover:bg-[rgba(107,90,237,0.15)]" : "border-l-transparent border-white/[0.04] bg-white/[0.02] hover:border-white/10 hover:bg-white/[0.05]"}`}>
-                {/* Position */}
-                <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-sm font-bold ${isMine ? "bg-[var(--primary)] text-white" : "bg-white/[0.04] text-[var(--text-muted)]"}`}>
-                  {idx + 1}
+      {/* Up Next */}
+      <section className="flex-1 overflow-y-auto px-5 pt-6 pb-5">
+        {/* Now Playing card */}
+        {nowPlaying && (
+          <div className="mb-5">
+            <h2 className="font-display text-[13px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-2">Now Playing</h2>
+            <div className="glass-panel flex items-center gap-3 border-l-[3px] !border-l-[var(--brand)] p-3" style={{ background: "var(--brand-glow)", boxShadow: "inset 0 0 20px var(--brand-glow)" }}>
+              {nowPlaying.thumbnail ? (
+                <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-lg">
+                  <Image src={nowPlaying.thumbnail} alt={nowPlaying.title} fill className="object-cover" unoptimized />
+                  {/* Equalizer overlay */}
+                  <div className="absolute inset-0 flex items-end justify-end bg-black/30 p-1">
+                    <div className="equalizer"><span /><span /><span /></div>
+                  </div>
                 </div>
+              ) : (
+                <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-[var(--surface-hover)]">
+                  <Music className="h-5 w-5 text-[var(--brand)]" />
+                </div>
+              )}
+              <div className="min-w-0 flex-1">
+                <p className="line-clamp-2 text-[14px] font-medium leading-tight text-[var(--text-primary)]">{nowPlaying.title}</p>
+                <p className="mt-1 text-[12px] text-[var(--text-secondary)]">added by {nowPlaying.user?.name || "unknown"}</p>
+              </div>
+            </div>
+          </div>
+        )}
 
-                {/* Thumbnail */}
-                {song.thumbnail ? (
-                  <div className="relative h-14 w-24 shrink-0 overflow-hidden rounded-xl">
-                    <Image src={song.thumbnail} alt={song.title} fill className="object-cover" unoptimized />
-                    {/* Play overlay on hover (host) */}
-                    {isCreator && (
-                      <button onClick={() => handlePlaySong(song.id)} className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 transition group-hover:opacity-100">
-                        <svg className="h-6 w-6 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
+        <div className="mb-4 flex items-center justify-between">
+          <div>
+            <h2 className="font-display text-lg font-semibold text-[var(--text-primary)]">Up Next</h2>
+            <div className="mt-1 h-[3px] w-6 rounded-full bg-[var(--brand)]" />
+          </div>
+          <div className="flex items-center gap-3">
+            {isCreator && queue.length > 0 && (
+              <button onClick={handleClearQueue} className="rounded-lg px-2.5 py-1 text-[11px] font-medium text-[var(--danger)] transition hover:bg-red-500/10">
+                Clear All
+              </button>
+            )}
+            <span className="text-[12px] text-[var(--text-muted)]">{queue.length} track{queue.length !== 1 ? "s" : ""}</span>
+          </div>
+        </div>
+        {queue.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-[var(--border)] py-12 text-center">
+            <Music className="mx-auto mb-2 h-8 w-8 text-[var(--text-muted)]" />
+            <p className="text-[13px] text-[var(--text-muted)]">{nowPlaying ? "Queue is empty." : canAddSongs ? "Search above to add a song!" : "Waiting for the host."}</p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {queue.map((song, idx) => {
+              const canRemove = isCreator || (user && song.userId === user.id);
+              const isMine = user && song.userId === user.id;
+              return (
+                <div key={song.id} className={`queue-card group glass-panel flex items-center gap-3 px-4 py-3 ${isMine ? "!border-l-[3px] !border-l-[var(--brand)] !bg-[var(--brand-glow)]" : ""}`}>
+                  {/* Rank */}
+                  <div className={`flex w-6 shrink-0 items-center justify-center text-[20px] font-bold ${isMine ? "text-[var(--brand)]" : "text-[var(--text-muted)]"}`}>{idx + 1}</div>
+                  {/* Thumbnail */}
+                  {song.thumbnail ? (
+                    <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-lg">
+                      <Image src={song.thumbnail} alt={song.title} fill className="object-cover" unoptimized />
+                      {isCreator && (
+                        <button onClick={() => handlePlaySong(song.id)} className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 transition group-hover:opacity-100">
+                          <Play className="h-5 w-5 text-white" fill="white" />
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-[var(--surface-hover)]">
+                      <Music className="h-5 w-5 text-[var(--text-muted)]" />
+                    </div>
+                  )}
+                  {/* Info */}
+                  <div className="min-w-0 flex-1">
+                    <p className="line-clamp-2 text-[15px] font-medium leading-snug text-[var(--text-primary)]">{song.title}</p>
+                    <p className="mt-1 flex items-center gap-1.5 text-[12px] text-[var(--text-secondary)]">
+                      added by {song.user?.name || "unknown"}
+                      {isMine && <span className="rounded-full bg-[var(--brand)] px-2 py-px text-[10px] font-bold text-white">YOU</span>}
+                    </p>
+                  </div>
+                  {/* Actions */}
+                  <div className="flex shrink-0 flex-col items-center gap-1">
+                    <button onClick={() => handleUpvote(song.id)} className={`flex flex-col items-center rounded-lg px-2 py-1 transition ${song.hasVoted ? "text-[var(--brand)]" : "text-[var(--text-muted)] hover:text-[var(--text-primary)]"}`}>
+                      <ChevronUp className="h-5 w-5" />
+                      <span className="text-[13px] font-semibold tabular-nums">{song.upvotes}</span>
+                    </button>
+                    {canRemove && (
+                      <button onClick={() => handleRemoveSong(song.id)} className="text-[var(--text-muted)] transition hover:text-[var(--danger)]">
+                        <Trash2 className="h-3.5 w-3.5" />
                       </button>
                     )}
                   </div>
-                ) : (
-                  <div className="flex h-14 w-24 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-[var(--primary)]/10 to-[var(--accent-purple)]/10">
-                    <svg className="h-6 w-6 text-[var(--text-muted)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" /></svg>
-                  </div>
-                )}
-
-                {/* Song info */}
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-semibold text-[var(--text-light)] leading-tight">{song.title}</p>
-                  <p className="mt-1 flex items-center gap-1.5 text-xs text-[var(--text-muted)]">
-                    added by {song.user?.name || "unknown"}
-                    {isMine && <span className="rounded bg-[var(--primary)]/15 px-1.5 py-px text-[9px] font-bold uppercase text-[var(--primary)]">you</span>}
-                  </p>
                 </div>
-
-                {/* Actions */}
-                <div className="flex shrink-0 items-center gap-2">
-                  {/* Remove button */}
-                  {canRemove && (
-                    <button onClick={() => handleRemoveSong(song.id)} className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/[0.06] bg-white/[0.03] text-[var(--text-muted)] opacity-0 transition-all hover:border-red-500/30 hover:bg-red-500/10 hover:text-red-400 group-hover:opacity-100" title="Remove">
-                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                    </button>
-                  )}
-
-                  {/* Upvote */}
-                  <button onClick={() => handleUpvote(song.id)} className={`flex items-center gap-1.5 rounded-xl border px-3.5 py-2 transition-all ${song.hasVoted ? "border-[var(--primary)]/50 bg-[var(--primary)]/10 shadow-[0_0_12px_rgba(107,90,237,0.15)]" : "border-white/[0.06] bg-white/[0.03] hover:border-[var(--primary)]/30 hover:bg-[var(--primary)]/5"}`}>
-                    <svg className={`h-4 w-4 transition-all ${song.hasVoted ? "text-[var(--primary)] scale-110" : "text-[var(--text-muted)]"}`} fill={song.hasVoted ? "currentColor" : "none"} viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 15l7-7 7 7" /></svg>
-                    <span className={`text-sm font-bold tabular-nums ${song.hasVoted ? "text-[var(--primary)]" : "text-[var(--text-light)]"}`}>{song.upvotes}</span>
-                  </button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
+              );
+            })}
+          </div>
+        )}
+        {/* Start Playing button */}
+        {isCreator && songs.length > 0 && !nowPlaying && queue.length > 0 && (
+          <button onClick={() => queue[0] && handlePlaySong(queue[0].id)} className="glow-button mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-[var(--brand)] py-3 text-sm font-semibold text-white transition hover:brightness-110 active:scale-[0.97]">
+            <Play className="h-4 w-4" fill="white" />Start Playing
+          </button>
+        )}
+      </section>
     </div>
   );
 
-  // ==============================================================
-  // PLAYER
-  // ==============================================================
-  const playerJSX = (
-    <YouTubePlayer videoId={currentVideoId} songTitle={nowPlaying?.title} songArtist={nowPlaying?.user?.name} isHost={isCreator} syncState={syncState} onSkip={handleSongEnd} onHostPlayback={handleHostPlayback} />
+  // ==================================================================
+  // NOW PLAYING PANEL CONTENT
+  // ==================================================================
+  const playerPanelContent = (
+    <div className="flex h-full flex-col items-center overflow-y-auto px-5 py-6 md:px-8">
+      {/* NOW PLAYING header */}
+      <h2 className="mb-5 font-display text-[13px] font-semibold uppercase tracking-widest text-[var(--text-muted)]">Now Playing</h2>
+      <div className={`w-full transition-all duration-300 ${chatCollapsed ? "max-w-[640px]" : "max-w-[520px]"}`}>
+        <YouTubePlayer videoId={currentVideoId} songTitle={nowPlaying?.title} songArtist={nowPlaying?.user?.name} isHost={isCreator} syncState={syncState} onSkip={handleSongEnd} onHostPlayback={handleHostPlayback} />
+      </div>
+    </div>
   );
 
-  // ==============================================================
+  // ==================================================================
   // LAYOUT
-  // ==============================================================
+  // ==================================================================
   return (
-    <div className="min-h-screen bg-[var(--bg-dark)]">
-      <div className="pointer-events-none fixed inset-0 z-0 opacity-15">
-        <div className="animate-float absolute -left-[10%] -top-[10%] h-[400px] w-[400px] rounded-full bg-[radial-gradient(circle,var(--primary)_0%,transparent_70%)] blur-[80px]" />
-        <div className="animate-float-delay-5 absolute -bottom-[10%] -right-[10%] h-[300px] w-[300px] rounded-full bg-[radial-gradient(circle,var(--accent-blue)_0%,transparent_70%)] blur-[80px]" />
-      </div>
+    <div className="flex h-screen flex-col bg-[var(--background)]">
+      {/* Ambient orbs */}
+      <div className="ambient-orb-1" />
+      <div className="ambient-orb-2" />
 
-      <Navbar />
-
-      {isDesktop ? (
-        <div className="relative z-[1] flex h-screen pt-16">
-          <div className="flex-1 overflow-y-auto px-8 pt-8 pb-10">
-            {headerJSX}
-            {searchJSX}
-            {queueJSX}
+      {/* Mobile room header (< 768px) */}
+      {!isTablet && !isDesktop ? (
+        <header className="fixed top-0 left-0 right-0 z-50 flex h-12 items-center justify-between border-b border-[var(--border)] bg-[var(--surface)] px-3">
+          <button onClick={handleLeaveRoom} className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--text-secondary)] transition hover:text-[var(--text-primary)] hover:bg-[var(--surface-hover)]">
+            <ChevronLeft className="h-5 w-5" />
+          </button>
+          <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-2 max-w-[50%]">
+            {nowPlaying && <div className="equalizer shrink-0"><span /><span /><span /></div>}
+            <h1 className="truncate text-[16px] font-semibold text-[var(--text-primary)]">{room.name}</h1>
           </div>
-          <div className="w-[55%] max-w-[680px] shrink-0 border-l border-white/5 overflow-y-auto">
-            <div className="px-8 pt-8 pb-10">{playerJSX}</div>
-          </div>
-        </div>
+          <button onClick={() => { navigator.clipboard.writeText(room.code); setCopied(true); setTimeout(() => setCopied(false), 2000); }} className="flex items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--surface-hover)] px-2.5 py-1 text-[11px]">
+            <span className="font-mono font-bold tracking-wider text-[var(--brand)]">{room.code}</span>
+            {copied ? <Check className="h-3 w-3 text-[var(--success)]" /> : <Copy className="h-3 w-3 text-[var(--text-muted)]" />}
+          </button>
+        </header>
       ) : (
-        <>
-          <div className="fixed top-16 left-0 right-0 z-30 border-b border-white/5 bg-[var(--bg-dark)]/90 backdrop-blur-md">
-            <div className="flex">
-              <button onClick={() => setMobileTab("queue")} className={`flex-1 py-3 text-center text-sm font-semibold transition ${mobileTab === "queue" ? "text-[var(--primary)] border-b-2 border-[var(--primary)]" : "text-[var(--text-muted)]"}`}>
-                Queue ({songs.length})
-              </button>
-              <button onClick={() => setMobileTab("player")} className={`flex-1 py-3 text-center text-sm font-semibold transition ${mobileTab === "player" ? "text-[var(--primary)] border-b-2 border-[var(--primary)]" : "text-[var(--text-muted)]"}`}>
-                {nowPlaying ? <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 animate-pulse rounded-full bg-[var(--primary)]" />Player</span> : "Player"}
-              </button>
-            </div>
-          </div>
-          <div className="relative z-[1] px-5 pt-28 pb-16">
-            {mobileTab === "queue" ? <>{headerJSX}{searchJSX}{queueJSX}</> : <div className="pt-2">{playerJSX}</div>}
-          </div>
-        </>
+        <Navbar />
       )}
 
+      {/* Connection banner */}
+      {connectionStatus !== "connected" && (
+        <div className={`fixed top-14 left-0 right-0 z-50 flex items-center justify-center gap-2 py-2 text-sm font-medium ${connectionStatus === "reconnecting" ? "bg-amber-500/90 text-black" : "text-white"}`} style={connectionStatus === "disconnected" ? { background: "rgba(239,68,68,0.9)" } : undefined}>
+          {connectionStatus === "reconnecting" ? (
+            <><div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-black/30 border-t-black" />Reconnecting...</>
+          ) : (
+            <>Disconnected <button onClick={() => { getSocket().connect(); setConnectionStatus("reconnecting"); }} className="ml-2 rounded-full bg-white/20 px-3 py-0.5 text-xs font-semibold">Retry</button></>
+          )}
+        </div>
+      )}
+
+      {/* ===== DESKTOP >= 1024px: 3 columns ===== */}
+      {isDesktop ? (
+        <div className="flex flex-1 overflow-hidden pt-14">
+          {/* Queue Panel */}
+          <aside className={`shrink-0 border-r border-[var(--border)] overflow-hidden transition-[width] duration-300 ease-in-out ${chatCollapsed ? "w-[38%]" : "w-[32%] max-w-[480px]"}`}>
+            {queuePanelContent}
+          </aside>
+          {/* Now Playing Panel */}
+          <main className="relative flex-1 min-w-0 overflow-y-auto transition-[flex] duration-300 ease-in-out">
+            {playerPanelContent}
+            {/* "Open Chat" button — only when collapsed */}
+            {chatCollapsed && (
+              <button
+                onClick={() => { setChatCollapsed(false); setUnreadChat(0); }}
+                className="absolute top-3 right-3 z-30 flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-2 text-[13px] font-medium text-[var(--text-secondary)] transition hover:border-[var(--brand)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)]"
+              >
+                <MessageCircle className="h-4 w-4" />
+                Open Chat
+                {unreadChat > 0 && <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-[var(--danger)] px-1.5 text-[10px] font-bold text-white">{unreadChat}</span>}
+              </button>
+            )}
+          </main>
+          {/* Chat Panel — always mounted, width animates to 0 */}
+          <aside className={`relative shrink-0 overflow-hidden transition-[width,border] duration-300 ease-in-out ${chatCollapsed ? "w-0 border-l-0" : "w-[24%] max-w-[380px] border-l border-[var(--border)]"}`}>
+            {/* Red close button */}
+            <button
+              onClick={() => setChatCollapsed(true)}
+              className="absolute top-2 right-2 z-30 flex h-7 w-7 items-center justify-center rounded-full text-white transition hover:brightness-110"
+              style={{ background: "rgba(239,68,68,0.85)" }}
+              title="Close chat"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+            {/* Inner wrapper keeps chat content at a fixed min-width so it doesn't squish during animation */}
+            <div className="h-full min-w-[280px]">
+              {id && <RoomChat roomId={id} currentUserId={user?.id || null} fullHeight />}
+            </div>
+          </aside>
+        </div>
+
+      /* ===== TABLET 768-1023px: 2 columns + slide-over chat ===== */
+      ) : isTablet ? (
+        <div className="flex flex-1 overflow-hidden pt-14">
+          <aside className="w-[300px] shrink-0 border-r border-[var(--border)] overflow-hidden">
+            {queuePanelContent}
+          </aside>
+          <main className="flex-1 min-w-0 overflow-y-auto relative">
+            {playerPanelContent}
+            {/* Chat toggle button */}
+            <button onClick={() => { setShowChatSlide(!showChatSlide); setUnreadChat(0); }} className="fixed bottom-6 right-6 z-40 flex h-12 w-12 items-center justify-center rounded-full bg-[var(--brand)] text-white shadow-lg transition hover:brightness-110 active:scale-95">
+              <MessageCircle className="h-5 w-5" />
+              {unreadChat > 0 && !showChatSlide && <span className="absolute -right-0.5 -top-0.5 h-[6px] w-[6px] rounded-full bg-[var(--danger)]" />}
+            </button>
+          </main>
+          {/* Chat slide-over */}
+          {showChatSlide && (
+            <>
+              <div className="fixed inset-0 z-40 bg-black/40" onClick={() => setShowChatSlide(false)} />
+              <div className="fixed top-14 right-0 bottom-0 z-50 w-[300px] border-l border-[var(--border)] bg-[var(--background)]">
+                {id && <RoomChat roomId={id} currentUserId={user?.id || null} fullHeight />}
+              </div>
+            </>
+          )}
+        </div>
+
+      /* ===== MOBILE < 768px: bottom tab bar ===== */
+      ) : (
+        <div className="flex flex-1 flex-col overflow-hidden pt-12">
+          {/* Content area */}
+          <div className="flex-1 overflow-y-auto pb-14">
+            {mobileTab === "queue" ? (
+              queuePanelContent
+            ) : mobileTab === "player" ? (
+              playerPanelContent
+            ) : (
+              id && <RoomChat roomId={id} currentUserId={user?.id || null} fullHeight />
+            )}
+          </div>
+          {/* Bottom tab bar */}
+          <nav className="fixed bottom-0 left-0 right-0 z-40 flex h-14 items-center border-t border-[var(--border)] bg-[var(--surface)]" style={{ paddingBottom: "env(safe-area-inset-bottom)" }}>
+            {([
+              { key: "queue" as const, icon: ListMusic, label: "Queue" },
+              { key: "player" as const, icon: Disc3, label: "Player" },
+              { key: "chat" as const, icon: MessageCircle, label: "Chat" },
+            ]).map(({ key, icon: Icon, label }) => (
+              <button key={key} onClick={() => { setMobileTab(key); if (key === "chat") setUnreadChat(0); }} className={`flex flex-1 flex-col items-center gap-1 py-1 transition ${mobileTab === key ? "text-[var(--brand)]" : "text-[var(--text-muted)]"}`}>
+                <div className="relative">
+                  <Icon className="h-5 w-5" />
+                  {key === "player" && nowPlaying && mobileTab !== "player" && <span className="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full bg-[var(--brand)]" />}
+                  {key === "chat" && unreadChat > 0 && mobileTab !== "chat" && <span className="absolute -right-1 -top-1 h-[6px] w-[6px] rounded-full bg-[var(--danger)]" />}
+                </div>
+                <span className="text-[11px]">{label}</span>
+                {mobileTab === key && <div className="mt-0.5 h-[3px] w-3 rounded-full bg-[var(--brand)]" />}
+              </button>
+            ))}
+          </nav>
+        </div>
+      )}
+
+      {/* Modal */}
       {modal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="mx-4 w-full max-w-sm animate-fade-in-up rounded-2xl border border-white/10 bg-[var(--bg-darker)] p-6 shadow-2xl">
-            <div className={`mb-4 flex h-12 w-12 items-center justify-center rounded-full ${modal.type === "error" ? "bg-red-500/10" : modal.type === "confirm" ? "bg-amber-500/10" : "bg-[var(--primary)]/10"}`}>
-              {modal.type === "error" ? <svg className="h-5 w-5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg> : modal.type === "confirm" ? <svg className="h-5 w-5 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg> : <svg className="h-5 w-5 text-[var(--primary)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>}
+          <div className="mx-4 w-full max-w-sm animate-fade-in-up rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6 shadow-2xl">
+            <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full" style={{ background: modal.type === "error" ? "rgba(239,68,68,0.1)" : modal.type === "confirm" ? "rgba(245,158,11,0.1)" : "rgba(124,58,237,0.1)" }}>
+              {modal.type === "error" ? <X className="h-5 w-5 text-[var(--danger)]" /> : modal.type === "confirm" ? <Trash2 className="h-5 w-5 text-amber-400" /> : <Music className="h-5 w-5 text-[var(--brand)]" />}
             </div>
-            <h3 className="mb-1 text-lg font-semibold text-[var(--text-light)]">{modal.title}</h3>
-            <p className="mb-6 text-sm leading-relaxed text-[var(--text-muted)]">{modal.message}</p>
+            <h3 className="mb-1 text-lg font-semibold text-[var(--text-primary)]">{modal.title}</h3>
+            <p className="mb-6 text-sm leading-relaxed text-[var(--text-secondary)]">{modal.message}</p>
             {modal.type === "confirm" ? (
               <div className="flex gap-3">
-                <button onClick={() => setModal(null)} className="flex-1 rounded-xl bg-white/10 py-2.5 text-sm font-semibold text-[var(--text-light)] transition hover:bg-white/15">Cancel</button>
-                <button onClick={modal.onConfirm} className="flex-1 rounded-xl bg-red-500/90 py-2.5 text-sm font-semibold text-white transition hover:bg-red-500">Delete</button>
+                <button onClick={() => setModal(null)} className="flex-1 rounded-lg bg-[var(--surface-hover)] py-2.5 text-sm font-semibold text-[var(--text-primary)] transition hover:brightness-110">Cancel</button>
+                <button onClick={modal.onConfirm} className="flex-1 rounded-lg bg-[var(--danger)] py-2.5 text-sm font-semibold text-white transition hover:brightness-110">Delete</button>
               </div>
             ) : (
-              <button onClick={() => setModal(null)} className="w-full rounded-xl bg-white/10 py-2.5 text-sm font-semibold text-[var(--text-light)] transition hover:bg-white/15">OK</button>
+              <button onClick={() => setModal(null)} className="w-full rounded-lg bg-[var(--surface-hover)] py-2.5 text-sm font-semibold text-[var(--text-primary)] transition hover:brightness-110">OK</button>
             )}
           </div>
         </div>

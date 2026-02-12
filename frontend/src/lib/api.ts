@@ -141,10 +141,14 @@ export async function trackRoomJoin(roomId: string): Promise<void> {
   }).catch(() => {});
 }
 
-export async function getRoom(id: string): Promise<Room> {
-  const res = await fetch(`${API_URL}/rooms/${id}`, { cache: "no-store" });
-  if (!res.ok) throw new Error("Failed to fetch room");
-  return res.json();
+export async function getRoom(id: string): Promise<Room | null> {
+  try {
+    const res = await fetch(`${API_URL}/rooms/${id}`, { cache: "no-store" });
+    if (!res.ok) return null;
+    return res.json();
+  } catch {
+    return null;
+  }
 }
 
 export async function updateRoomMode(id: string, mode: "open" | "listen_only"): Promise<Room> {
@@ -177,6 +181,25 @@ export async function joinRoomByCode(code: string): Promise<Room> {
     const data = await res.json();
     throw new Error(data.error || "Room not found");
   }
+  return res.json();
+}
+
+// ---------- Messages ----------
+
+export interface ChatMessage {
+  id: string;
+  text: string;
+  userId: string;
+  userName: string;
+  createdAt: string;
+}
+
+export async function getMessages(roomId: string): Promise<ChatMessage[]> {
+  const res = await fetch(`${API_URL}/rooms/${roomId}/messages`, {
+    headers: authHeaders(),
+    cache: "no-store",
+  });
+  if (!res.ok) return [];
   return res.json();
 }
 
@@ -258,6 +281,17 @@ export async function playSong(songId: string): Promise<Song> {
     throw new Error(data.error || "Failed to play song");
   }
   return res.json();
+}
+
+export async function clearQueue(roomId: string): Promise<void> {
+  const res = await fetch(`${API_URL}/rooms/${roomId}/songs/clear`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+  if (!res.ok) {
+    const data = await res.json();
+    throw new Error(data.error || "Failed to clear queue");
+  }
 }
 
 export async function skipSong(roomId: string): Promise<Song[]> {

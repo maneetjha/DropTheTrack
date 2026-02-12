@@ -17,10 +17,13 @@
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
+    "express-rate-limit": "^8.2.1",
     "google-auth-library": "^10.5.0",
     "ioredis": "^5.4.2",
     "jsonwebtoken": "^9.0.3",
-    "socket.io": "^4.8.1"
+    "node-cron": "^4.2.1",
+    "socket.io": "^4.8.1",
+    "yt-search": "^2.13.1"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",

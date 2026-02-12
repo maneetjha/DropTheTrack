@@ -191,6 +191,13 @@ router.delete("/:id", requireAuth, async (req, res) => {
     }
 
     await prisma.room.delete({ where: { id } });
+
+    // Notify all users in the room to leave
+    const io = req.app.get("io");
+    if (io) {
+      io.to(id).emit("room-deleted", { roomId: id });
+    }
+
     res.json({ success: true });
   } catch (err) {
     console.error("[Rooms] Delete error:", err);

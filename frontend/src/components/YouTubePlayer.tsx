@@ -295,17 +295,19 @@ export default function YouTubePlayer({
     return `${m}:${sec.toString().padStart(2, "0")}`;
   };
 
+  const pct = duration > 0 ? (progress / duration) * 100 : 0;
+
   // ---- No song playing ----
   if (!videoId) {
     return (
-      <div className="flex flex-col items-center justify-center py-16 lg:py-20">
-        <div className="mb-4 flex h-20 w-20 items-center justify-center rounded-full bg-white/[0.03] border border-white/5">
+      <div className="flex w-full flex-col items-center justify-center py-16">
+        <div className="mb-4 flex h-20 w-20 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--surface)]">
           <svg className="h-10 w-10 text-[var(--text-muted)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
           </svg>
         </div>
-        <p className="text-sm text-[var(--text-muted)]">No song playing</p>
-        <p className="mt-1 text-xs text-white/30">
+        <p className="text-[14px] font-medium text-[var(--text-secondary)]">No song playing</p>
+        <p className="mt-1 text-[13px] text-[var(--text-muted)]">
           {isHost ? "Add a song and hit play to start" : "Waiting for the host to start playback"}
         </p>
       </div>
@@ -314,35 +316,39 @@ export default function YouTubePlayer({
 
   // ---- Active player ----
   return (
-    <div className="flex flex-col">
-      {/* Song info */}
-      <div className="mb-3 px-1">
-        <div className="flex items-center gap-2">
+    <div className="flex w-full flex-col items-center">
+      {/* YouTube player embed — with ambient glow */}
+      <div
+        className="relative w-full overflow-hidden rounded-2xl bg-black"
+        style={{
+          aspectRatio: "16/9",
+          boxShadow: "0 0 80px 20px var(--brand-glow), 0 0 160px 60px rgba(124, 58, 237, 0.08)",
+        }}
+      >
+        <div ref={containerRef} className="absolute inset-0" />
+
+        {/* LIVE / Paused badge — overlaid on top-left of video */}
+        <div className="absolute top-3 left-3 z-20 flex items-center gap-1.5 rounded-lg bg-black/60 px-2.5 py-1 backdrop-blur-sm">
           {playerPaused ? (
             <>
               <span className="h-2 w-2 rounded-full bg-amber-400" />
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-amber-400">Paused</span>
+              <span className="text-[11px] font-bold uppercase tracking-[1px] text-amber-400">Paused</span>
             </>
           ) : (
             <>
-              <span className="h-2 w-2 animate-pulse rounded-full bg-red-500" />
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-red-400">Live</span>
+              <span className="animate-pulse-dot h-2 w-2 rounded-full bg-[var(--danger)]" />
+              <span className="text-[11px] font-bold uppercase tracking-[1px] text-[var(--danger)]">LIVE</span>
+              <div className="equalizer ml-0.5" style={{ height: "12px" }}>
+                <span style={{ width: "2px" }} /><span style={{ width: "2px" }} /><span style={{ width: "2px" }} />
+              </div>
             </>
           )}
         </div>
-        <p className="mt-1 truncate text-lg font-bold text-[var(--text-light)]">{songTitle || "Unknown"}</p>
-        {songArtist && (
-          <p className="mt-0.5 truncate text-sm text-[var(--text-muted)]">added by {songArtist}</p>
-        )}
-      </div>
 
-      {/* YouTube player embed */}
-      <div className="relative w-full overflow-hidden rounded-2xl bg-black" style={{ aspectRatio: "16/9" }}>
-        <div ref={containerRef} className="absolute inset-0" />
-        {/* Loading spinner — only when genuinely loading, NOT when paused */}
+        {/* Loading spinner */}
         {(!ready || (isBuffering && !playerPaused)) && (
           <div className="absolute inset-0 flex items-center justify-center bg-black/80">
-            <div className="h-8 w-8 animate-spin rounded-full border-2 border-[var(--primary)] border-t-transparent" />
+            <div className="h-8 w-8 animate-spin rounded-full border-2 border-[var(--brand)] border-t-transparent" />
           </div>
         )}
         {/* Paused overlay */}
@@ -359,12 +365,19 @@ export default function YouTubePlayer({
             </p>
           </div>
         )}
-        {/* Overlay prevents clicking the iframe directly */}
         {!playerPaused && <div className="absolute inset-0 z-10" />}
       </div>
 
-      {/* Progress bar — interactive for host, read-only for listeners */}
-      <div className="mt-4 px-1">
+      {/* Song Info — centered, Space Grotesk */}
+      <div className="mt-5 w-full text-center">
+        <p className="font-display text-[22px] font-bold text-[var(--text-primary)]" style={{ textWrap: "balance" }}>{songTitle || "Unknown"}</p>
+        {songArtist && (
+          <p className="mt-1 text-[14px] text-[var(--text-secondary)]">added by {songArtist}</p>
+        )}
+      </div>
+
+      {/* Progress bar */}
+      <div className="mt-5 w-full">
         {isHost ? (
           <input
             type="range"
@@ -375,122 +388,81 @@ export default function YouTubePlayer({
             onInput={(e) => handleSeek(Number((e.target as HTMLInputElement).value))}
             onChange={(e) => handleSeek(Number(e.target.value))}
             className="progress-slider w-full"
-            style={{ background: `linear-gradient(to right, var(--primary) ${duration > 0 ? (progress / duration) * 100 : 0}%, rgba(255,255,255,0.1) ${duration > 0 ? (progress / duration) * 100 : 0}%)` }}
+            style={{ background: `linear-gradient(to right, var(--brand) ${pct}%, var(--surface-hover) ${pct}%)` }}
           />
         ) : (
-          <div className="relative h-1.5 w-full rounded-full bg-white/10 overflow-hidden">
+          <div className="relative h-1 w-full rounded-full bg-[var(--surface-hover)] overflow-hidden">
             <div
-              className="absolute left-0 top-0 h-full rounded-full bg-[var(--primary)] transition-all duration-500"
-              style={{ width: `${duration > 0 ? (progress / duration) * 100 : 0}%` }}
+              className="absolute left-0 top-0 h-full rounded-full bg-[var(--brand)] transition-all duration-500"
+              style={{ width: `${pct}%` }}
             />
           </div>
         )}
-        <div className="mt-1.5 flex justify-between text-xs text-[var(--text-muted)]">
+        <div className="mt-2 flex justify-between text-[12px] text-[var(--text-muted)]">
           <span>{formatTime(progress)}</span>
           <span>{formatTime(duration)}</span>
         </div>
       </div>
 
-      {/* Controls */}
-      <div className="mt-3 flex items-center gap-3">
-        {/* Host: Play/Pause — affects everyone */}
-        {isHost && (
-          <button
-            onClick={togglePlayPause}
-            className="flex h-12 w-12 items-center justify-center rounded-full bg-white text-black transition-transform hover:scale-105 active:scale-95"
-            title={playerPaused ? "Resume for everyone" : "Pause for everyone"}
-          >
-            {playerPaused ? (
-              <svg className="ml-0.5 h-5 w-5" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M8 5v14l11-7z" />
-              </svg>
-            ) : (
-              <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24">
-                <rect x="6" y="4" width="4" height="16" rx="1" />
-                <rect x="14" y="4" width="4" height="16" rx="1" />
-              </svg>
-            )}
-          </button>
-        )}
-
-        {/* Non-host: Mute toggle as primary button */}
-        {!isHost && (
+      {/* Playback Controls */}
+      <div className="mt-5 flex w-full items-center justify-center gap-4">
+        {/* Volume group */}
+        <div className="flex items-center gap-3 rounded-xl px-4 py-2.5" style={{ background: "rgba(19, 19, 26, 0.8)", border: "1px solid var(--border)" }}>
           <button
             onClick={toggleMute}
-            className={`flex h-12 w-12 items-center justify-center rounded-full transition-transform hover:scale-105 active:scale-95 ${
-              isMuted ? "bg-red-500/20 text-red-400 border border-red-500/30" : "bg-white text-black"
-            }`}
+            className="shrink-0 text-[var(--text-secondary)] transition hover:text-[var(--text-primary)]"
             title={isMuted ? "Unmute" : "Mute"}
           >
             {isMuted ? (
-              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
-                <path strokeLinecap="round" strokeLinejoin="round" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" />
-              </svg>
+              <svg className="h-5 w-5 text-[var(--danger)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" /><path strokeLinecap="round" strokeLinejoin="round" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" /></svg>
+            ) : volume < 50 ? (
+              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15.536 8.464a5 5 0 010 7.072" /></svg>
             ) : (
-              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15.536 8.464a5 5 0 010 7.072M18.364 5.636a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
-              </svg>
+              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15.536 8.464a5 5 0 010 7.072M18.364 5.636a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" /></svg>
             )}
           </button>
-        )}
-
-        {/* Volume slider */}
-        <div className="flex flex-1 items-center gap-2">
-          {/* Host also gets a small mute button */}
-          {isHost && (
-            <button
-              onClick={toggleMute}
-              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[var(--text-muted)] transition hover:bg-white/5 hover:text-[var(--text-light)]"
-              title={isMuted ? "Unmute" : "Mute"}
-            >
-              {isMuted ? (
-                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" />
-                </svg>
-              ) : volume < 50 ? (
-                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.536 8.464a5 5 0 010 7.072" />
-                </svg>
-              ) : (
-                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.536 8.464a5 5 0 010 7.072M18.364 5.636a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
-                </svg>
-              )}
-            </button>
-          )}
           <input
-            type="range"
-            min="0"
-            max="100"
-            value={volume}
+            type="range" min="0" max="100" value={volume}
             onInput={(e) => handleVolume(Number((e.target as HTMLInputElement).value))}
             onChange={(e) => handleVolume(Number(e.target.value))}
-            className="volume-slider flex-1"
-            style={{ background: `linear-gradient(to right, rgba(255,255,255,0.7) ${volume}%, rgba(255,255,255,0.12) ${volume}%)` }}
+            className="volume-slider w-24"
+            style={{ background: `linear-gradient(to right, var(--text-secondary) ${volume}%, var(--surface-hover) ${volume}%)` }}
           />
-          <span className="w-7 text-right text-[10px] text-[var(--text-muted)]">{volume}</span>
+          <span className="w-7 text-right text-[12px] tabular-nums text-[var(--text-muted)]">{volume}</span>
         </div>
 
-        {/* Skip — always visible for host */}
-        {isHost && (
+        {/* Play/Pause — center, always prominent */}
+        {isHost ? (
           <button
-            onClick={onSkip}
-            className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-[var(--text-light)] transition hover:bg-white/20 active:scale-95"
-            title="Skip to next song"
+            onClick={togglePlayPause}
+            className="glow-button flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-[var(--brand)] text-white transition hover:brightness-110 active:scale-95"
+            style={{ boxShadow: "0 0 24px rgba(124,58,237,0.35)" }}
+            title={playerPaused ? "Resume for everyone" : "Pause for everyone"}
           >
-            <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M6 4l10 8-10 8V4z" />
-              <rect x="16" y="4" width="2.5" height="16" rx="1" />
-            </svg>
+            {playerPaused ? (
+              <svg className="ml-0.5 h-6 w-6" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
+            ) : (
+              <svg className="h-6 w-6" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16" rx="1" /><rect x="14" y="4" width="4" height="16" rx="1" /></svg>
+            )}
           </button>
+        ) : null}
+
+        {/* Skip — host only */}
+        {isHost && (
+          <div className="flex items-center rounded-xl px-4 py-2.5" style={{ background: "rgba(19, 19, 26, 0.8)", border: "1px solid var(--border)" }}>
+            <button
+              onClick={onSkip}
+              className="text-[var(--text-secondary)] transition hover:text-[var(--text-primary)] active:scale-95"
+              title="Skip to next song"
+            >
+              <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24"><path d="M6 4l10 8-10 8V4z" /><rect x="16" y="4" width="2.5" height="16" rx="1" /></svg>
+            </button>
+          </div>
         )}
       </div>
 
-      {/* Hint */}
-      <p className="mt-3 text-center text-[10px] text-white/20">
+      {/* Subtitle */}
+      <p className="mt-3 text-center text-[11px] italic text-[var(--text-muted)]">
         {isHost
           ? "Play/pause controls the room for everyone"
           : isMuted
