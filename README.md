@@ -1,89 +1,77 @@
 # DropTheTrack
 
-A collaborative music queue where users create rooms, add songs, and upvote to decide what plays next. Built for both desktop and mobile.
+Collaborative music rooms where friends add songs, upvote the queue, and listen together in real time.
 
 ## Tech Stack
 
-| Layer    | Tech                              |
-| -------- | --------------------------------- |
-| Frontend | Next.js 16, Tailwind CSS 4, TypeScript |
-| Backend  | Node.js, Express, Socket.io       |
-| Database | PostgreSQL 16                     |
-| Cache    | Redis 7                           |
-| Realtime | Socket.io (WebSocket)             |
+- **Frontend** -- Next.js 16, React 19, Tailwind CSS 4, TypeScript
+- **Backend** -- Node.js, Express, Prisma ORM
+- **Realtime** -- Socket.io (WebSocket)
+- **Database** -- PostgreSQL 16, Redis 7
+- **Auth** -- Google OAuth + JWT
 
-## Quick Start
+## Getting Started
 
-### 1. Start Postgres & Redis
+### Prerequisites
+
+Docker, Node.js 20+
+
+### 1. Infrastructure
 
 ```bash
-docker compose up -d
+docker compose up -d   # starts Postgres & Redis
 ```
 
-### 2. Start the Backend
+### 2. Backend
 
 ```bash
 cd backend
-cp .env.example .env   # already done if you cloned fresh
+cp .env.example .env   # fill in your Google OAuth & YouTube API keys
 npm install
-npm run dev
+npx prisma migrate dev
+npm run dev             # http://localhost:4000
 ```
 
-Backend runs on **http://localhost:4000**. Health check: `GET /api/ping`
-
-### 3. Start the Frontend
+### 3. Frontend
 
 ```bash
 cd frontend
+cp .env.local.example .env.local   # set NEXT_PUBLIC_API_URL if needed
 npm install
-npm run dev
+npm run dev             # http://localhost:3000
 ```
-
-Frontend runs on **http://localhost:3000**
-
-## API Endpoints
-
-| Method | Endpoint                        | Description              |
-| ------ | ------------------------------- | ------------------------ |
-| GET    | `/api/ping`                     | Health check (DB + Redis)|
-| POST   | `/api/rooms`                    | Create a room            |
-| GET    | `/api/rooms`                    | List all rooms           |
-| GET    | `/api/rooms/:id`                | Get room by ID           |
-| POST   | `/api/rooms/:roomId/songs`      | Add song to room         |
-| GET    | `/api/rooms/:roomId/songs`      | Get song queue for room  |
-| POST   | `/api/songs/:songId/upvote`     | Upvote a song            |
-
-## Socket Events
-
-| Event            | Direction      | Payload                     |
-| ---------------- | -------------- | --------------------------- |
-| `join-room`      | Client -> Server | `roomId`                  |
-| `leave-room`     | Client -> Server | `roomId`                  |
-| `song-added`     | Client -> Server | `{ roomId, song }`        |
-| `song-upvoted`   | Client -> Server | `{ roomId, songId, upvotes }` |
-| `queue-updated`  | Server -> Client | `{ song/songId, action }` |
-| `user-joined`    | Server -> Client | `{ socketId }`            |
-| `user-left`      | Server -> Client | `{ socketId }`            |
 
 ## Project Structure
 
 ```
-DropTheTrack/
-├── backend/
-│   ├── src/
-│   │   ├── config/      # DB & Redis connections
-│   │   ├── routes/       # Express routes
-│   │   ├── sockets/      # Socket.io handlers
-│   │   └── index.js      # Entry point
-│   ├── .env
-│   └── package.json
-├── frontend/
-│   ├── src/
-│   │   ├── app/          # Next.js pages (home + room)
-│   │   ├── components/   # UI components
-│   │   └── lib/          # API client + Socket helper
-│   ├── .env.local
-│   └── package.json
-├── docker-compose.yml
-└── README.md
+backend/
+  src/
+    config/       # DB & Redis connections
+    routes/       # REST API (auth, rooms, songs, messages, youtube)
+    sockets/      # Real-time event handlers
+    middleware/    # JWT auth middleware
+    cron/         # Scheduled cleanup jobs
+  prisma/         # Schema & migrations
+
+frontend/
+  src/
+    app/          # Next.js pages (home, login, register, room/[id])
+    components/   # UI components (Navbar, RoomCard, YouTubePlayer, Chat, etc.)
+    lib/          # API client, auth context, socket helper
 ```
+
+## Environment Variables
+
+See `backend/.env.example` for the full list. Key ones:
+
+| Variable | Description |
+|---|---|
+| `DATABASE_URL` | PostgreSQL connection string |
+| `REDIS_URL` | Redis connection string |
+| `GOOGLE_CLIENT_ID` | Google OAuth client ID |
+| `JWT_SECRET` | Secret for signing JWTs |
+| `YOUTUBE_API_KEY` | YouTube Data API v3 key |
+
+## License
+
+MIT
