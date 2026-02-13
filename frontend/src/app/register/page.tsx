@@ -41,15 +41,15 @@ export default function RegisterPage() {
 
       <Navbar />
 
-      <main className="relative z-[1] mx-auto flex max-w-md flex-col items-center px-4 pt-28 pb-16">
-        <h1 className="animate-fade-in-up-1 font-display mb-2 text-3xl text-[var(--text-light)]">
+      <main className="relative z-[1] mx-auto flex max-w-md flex-col items-center px-4 pt-24 sm:pt-28 pb-16">
+        <h1 className="animate-fade-in-up-1 font-display mb-2 text-2xl sm:text-3xl text-[var(--text-light)]">
           Create account
         </h1>
-        <p className="animate-fade-in-up-2 mb-8 text-[var(--text-muted)]">
+        <p className="animate-fade-in-up-2 mb-6 sm:mb-8 text-sm sm:text-base text-[var(--text-muted)]">
           Join the party and start dropping tracks
         </p>
 
-        <div className="animate-fade-in-up-3 w-full space-y-5 rounded-3xl border border-white/5 bg-white/[0.02] p-6">
+        <div className="animate-fade-in-up-3 w-full space-y-4 sm:space-y-5 rounded-2xl sm:rounded-3xl border border-white/5 bg-white/[0.02] p-5 sm:p-6">
           {/* Email/Password Form */}
           <form onSubmit={handleSubmit} className="space-y-4">
             {error && (
@@ -69,7 +69,7 @@ export default function RegisterPage() {
                 onChange={(e) => setName(e.target.value)}
                 placeholder="Your name"
                 required
-                className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-[var(--text-light)] placeholder-[var(--text-muted)] outline-none transition focus:border-[var(--primary)] focus:ring-2 focus:ring-[rgba(107,90,237,0.2)]"
+                className="w-full rounded-xl border border-white/10 bg-white/5 px-3.5 py-2.5 sm:px-4 sm:py-3 text-sm sm:text-base text-[var(--text-light)] placeholder-[var(--text-muted)] outline-none transition focus:border-[var(--primary)] focus:ring-2 focus:ring-[rgba(107,90,237,0.2)]"
               />
             </div>
 
@@ -84,7 +84,7 @@ export default function RegisterPage() {
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="you@example.com"
                 required
-                className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-[var(--text-light)] placeholder-[var(--text-muted)] outline-none transition focus:border-[var(--primary)] focus:ring-2 focus:ring-[rgba(107,90,237,0.2)]"
+                className="w-full rounded-xl border border-white/10 bg-white/5 px-3.5 py-2.5 sm:px-4 sm:py-3 text-sm sm:text-base text-[var(--text-light)] placeholder-[var(--text-muted)] outline-none transition focus:border-[var(--primary)] focus:ring-2 focus:ring-[rgba(107,90,237,0.2)]"
               />
             </div>
 
@@ -100,14 +100,14 @@ export default function RegisterPage() {
                 placeholder="At least 6 characters"
                 required
                 minLength={6}
-                className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-[var(--text-light)] placeholder-[var(--text-muted)] outline-none transition focus:border-[var(--primary)] focus:ring-2 focus:ring-[rgba(107,90,237,0.2)]"
+                className="w-full rounded-xl border border-white/10 bg-white/5 px-3.5 py-2.5 sm:px-4 sm:py-3 text-sm sm:text-base text-[var(--text-light)] placeholder-[var(--text-muted)] outline-none transition focus:border-[var(--primary)] focus:ring-2 focus:ring-[rgba(107,90,237,0.2)]"
               />
             </div>
 
             <button
               type="submit"
               disabled={loading}
-              className="btn-ripple w-full rounded-full bg-gradient-to-br from-[var(--primary)] to-[var(--primary-dark)] py-3 font-semibold text-white shadow-[0_10px_30px_rgba(107,90,237,0.2)] transition-all hover:-translate-y-0.5 hover:shadow-[0_15px_40px_rgba(107,90,237,0.3)] disabled:cursor-not-allowed disabled:opacity-50"
+              className="btn-ripple w-full rounded-full bg-gradient-to-br from-[var(--primary)] to-[var(--primary-dark)] py-2.5 sm:py-3 text-sm sm:text-base font-semibold text-white shadow-[0_10px_30px_rgba(107,90,237,0.2)] transition-all hover:-translate-y-0.5 hover:shadow-[0_15px_40px_rgba(107,90,237,0.3)] disabled:cursor-not-allowed disabled:opacity-50"
             >
               {loading ? "Creating account..." : "Sign Up"}
             </button>

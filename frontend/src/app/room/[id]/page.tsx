@@ -15,7 +15,7 @@ import Navbar from "@/components/Navbar";
 import YouTubePlayer, { PlaybackState } from "@/components/YouTubePlayer";
 import RoomChat from "@/components/RoomChat";
 import {
-  ChevronLeft, Copy, Check, MoreVertical, Search, X, Music,
+  ChevronLeft, Copy, Check, MoreVertical, Search, X, Music, ChevronRight,
   ChevronUp, Trash2, Play, Lock, Unlock, LogOut, ListMusic, Disc3, MessageCircle,
 } from "lucide-react";
 
@@ -112,7 +112,14 @@ export default function RoomPage() {
     };
   }, [id, authLoading, user, fetchSongs]);
 
-  useEffect(() => { if (!isDesktop && !isTablet && songs.some((s) => s.isPlaying)) setMobileTab("player"); }, [songs, isDesktop, isTablet]);
+  // Auto-switch to player tab only on initial load if a song is already playing
+  const initialTabSet = useRef(false);
+  useEffect(() => {
+    if (!isDesktop && !isTablet && !initialTabSet.current && songs.some((s) => s.isPlaying)) {
+      setMobileTab("player");
+      initialTabSet.current = true;
+    }
+  }, [songs, isDesktop, isTablet]);
 
   // Track unread chat messages on mobile when not on chat tab
   useEffect(() => {
@@ -132,7 +139,11 @@ export default function RoomPage() {
   const handlePlaySong = async (songId: string) => { if (!id) return; try { await playSong(songId); await fetchSongs(); getSocket().emit("playback-changed", { roomId: id }); } catch (e) { setModal({ title: "Error", message: e instanceof Error ? e.message : "Failed to play", type: "error" }); } };
   const handleSkipSong = useCallback(async () => { if (!id) return; try { const u = await skipSong(id); setSongs(u); getSocket().emit("playback-changed", { roomId: id }); } catch (e) { console.error("Skip failed:", e); } }, [id]);
   const isCreatorRef = useRef(false);
-  const handleSongEnd = useCallback(() => { if (isCreatorRef.current) handleSkipSong(); }, [handleSkipSong]);
+  // When a song ends, any client emits song-ended — backend handles the skip with a lock
+  const handleSongEnd = useCallback(() => {
+    if (!id) return;
+    getSocket().emit("song-ended", { roomId: id });
+  }, [id]);
   const handleHostPlayback = useCallback((isPaused: boolean, currentTime: number) => { if (!id) return; getSocket().emit("host-playback", { roomId: id, isPaused, currentTime }); }, [id]);
   const handleDeleteRoom = () => { if (!id) return; setShowMenu(false); setModal({ title: "Delete room?", message: "This will permanently delete the room and all its songs.", type: "confirm", onConfirm: async () => { setModal(null); setDeleting(true); try { await deleteRoom(id); router.push("/"); } catch (e) { setModal({ title: "Error", message: e instanceof Error ? e.message : "Failed", type: "error" }); setDeleting(false); } } }); };
   const handleLeaveRoom = () => { const s = getSocket(); if (id) s.emit("leave-room", id); s.disconnect(); router.push("/"); };
@@ -215,18 +226,20 @@ export default function RoomPage() {
 
         {/* Row 2: Metadata */}
         <div className="mt-3 flex flex-wrap items-center gap-4 text-[14px] text-[var(--text-secondary)]">
+          {(() => { const host = users.find(u => u.isHost); return host ? <span>hosted by <span className="text-amber-400">{user && host.id === user.id ? "you" : host.name}</span></span> : null; })()}
           <span>{songs.length} song{songs.length !== 1 ? "s" : ""}</span>
           <div className="relative" ref={usersRef}>
             <button onClick={() => setShowUsers(!showUsers)} className="flex items-center gap-1.5 transition hover:text-[var(--text-primary)]">
               <span className="online-dot relative h-2 w-2 rounded-full bg-[var(--success)]" />
-              {users.length} online
+              {users.filter(u => !u.isOffline).length} online
+              <ChevronRight className={`h-3.5 w-3.5 transition-transform duration-200 ${showUsers ? "rotate-90" : ""}`} />
             </button>
             {showUsers && (
               <div className="absolute left-0 top-full z-50 mt-2 w-60 overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-2xl">
                 <div className="border-b border-[var(--border)] px-4 py-2.5"><p className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">People in room</p></div>
                 <div className="max-h-60 overflow-y-auto p-2">
-                  {users.length === 0 ? <p className="py-3 text-center text-xs text-[var(--text-muted)]">No one here yet</p> : users.map((u) => (
-                    <div key={u.id} className={`flex items-center gap-2.5 rounded-xl px-3 py-2 ${u.isOffline ? "opacity-30" : ""}`}>
+                  {users.filter(u => !u.isOffline).length === 0 ? <p className="py-3 text-center text-xs text-[var(--text-muted)]">No one here yet</p> : users.filter(u => !u.isOffline).map((u) => (
+                    <div key={u.id} className="flex items-center gap-2.5 rounded-xl px-3 py-2">
                       <div className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white ${u.isHost ? "bg-amber-500" : "bg-[var(--brand)]"}`}>{u.name.charAt(0).toUpperCase()}</div>
                       <span className="truncate text-sm font-medium text-[var(--text-primary)]">{u.name}</span>
                       <div className="ml-auto flex shrink-0 gap-1.5">
@@ -305,7 +318,7 @@ export default function RoomPage() {
               )}
               <div className="min-w-0 flex-1">
                 <p className="line-clamp-2 text-[14px] font-medium leading-tight text-[var(--text-primary)]">{nowPlaying.title}</p>
-                <p className="mt-1 text-[12px] text-[var(--text-secondary)]">added by {nowPlaying.user?.name || "unknown"}</p>
+                <p className="mt-1 text-[12px] text-[var(--text-secondary)]">added by {user && nowPlaying.user?.id === user.id ? "you" : nowPlaying.user?.name || "unknown"}</p>
               </div>
             </div>
           </div>
@@ -357,9 +370,8 @@ export default function RoomPage() {
                   {/* Info */}
                   <div className="min-w-0 flex-1">
                     <p className="line-clamp-2 text-[15px] font-medium leading-snug text-[var(--text-primary)]">{song.title}</p>
-                    <p className="mt-1 flex items-center gap-1.5 text-[12px] text-[var(--text-secondary)]">
-                      added by {song.user?.name || "unknown"}
-                      {isMine && <span className="rounded-full bg-[var(--brand)] px-2 py-px text-[10px] font-bold text-white">YOU</span>}
+                    <p className="mt-1 text-[12px] text-[var(--text-secondary)]">
+                      added by {isMine ? "you" : song.user?.name || "unknown"}
                     </p>
                   </div>
                   {/* Actions */}
@@ -508,16 +520,17 @@ export default function RoomPage() {
 
       /* ===== MOBILE < 768px: bottom tab bar ===== */
       ) : (
-        <div className="flex flex-1 flex-col overflow-hidden pt-12">
-          {/* Content area */}
-          <div className="flex-1 overflow-y-auto pb-14">
-            {mobileTab === "queue" ? (
-              queuePanelContent
-            ) : mobileTab === "player" ? (
-              playerPanelContent
-            ) : (
-              id && <RoomChat roomId={id} currentUserId={user?.id || null} fullHeight />
-            )}
+        <div className="relative flex flex-1 flex-col overflow-hidden pt-12">
+          {/* Content area — all panels always mounted, inactive panels positioned off-screen
+              so the YouTube iframe stays alive (display:none kills postMessage) */}
+          <div className={`absolute inset-0 overflow-y-auto pb-14 pt-12 ${mobileTab === "queue" ? "z-10" : "z-0 pointer-events-none -translate-x-full"}`}>
+            {queuePanelContent}
+          </div>
+          <div className={`absolute inset-0 overflow-y-auto pb-14 pt-12 ${mobileTab === "player" ? "z-10" : "z-0 pointer-events-none -translate-x-full"}`}>
+            {playerPanelContent}
+          </div>
+          <div className={`absolute inset-0 overflow-y-auto pb-14 pt-12 ${mobileTab === "chat" ? "z-10" : "z-0 pointer-events-none -translate-x-full"}`}>
+            {id && <RoomChat roomId={id} currentUserId={user?.id || null} fullHeight />}
           </div>
           {/* Bottom tab bar */}
           <nav className="fixed bottom-0 left-0 right-0 z-40 flex h-14 items-center border-t border-[var(--border)] bg-[var(--surface)]" style={{ paddingBottom: "env(safe-area-inset-bottom)" }}>

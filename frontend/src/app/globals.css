@@ -14,6 +14,11 @@
   --danger: #ef4444;
   --success: #22c55e;
 
+  /* Landing page palette */
+  --bg-secondary: #0f0f13;
+  --bg-tertiary: #1a1a24;
+  --accent-cyan: #06b6d4;
+
   /* Legacy aliases (used by some components) */
   --primary: #7c3aed;
   --primary-dark: #6d28d9;
@@ -293,3 +298,95 @@ body {
   transition: transform 0.6s ease;
 }
 .feature-card-border:hover::before { transform: translateX(0); }
+
+/* ========== LANDING / DASHBOARD PAGE ========== */
+
+/* -- neon card: purple -- */
+.neon-purple {
+  background: rgba(15, 15, 19, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1.5px solid rgba(124, 58, 237, 0.45);
+  border-radius: 14px;
+  box-shadow:
+    0 0 12px rgba(124, 58, 237, 0.25),
+    0 0 40px rgba(124, 58, 237, 0.12),
+    0 8px 24px rgba(0, 0, 0, 0.3);
+  transition: transform 300ms ease, box-shadow 300ms ease, border-color 300ms ease;
+}
+.neon-purple:hover {
+  transform: translateY(-3px);
+  border-color: rgba(124, 58, 237, 0.7);
+  box-shadow:
+    0 0 20px rgba(124, 58, 237, 0.4),
+    0 0 60px rgba(124, 58, 237, 0.18),
+    0 12px 32px rgba(0, 0, 0, 0.35);
+}
+
+/* -- neon card: cyan -- */
+.neon-cyan {
+  background: rgba(15, 15, 19, 0.75);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1.5px solid rgba(6, 182, 212, 0.4);
+  border-radius: 14px;
+  box-shadow:
+    0 0 12px rgba(6, 182, 212, 0.2),
+    0 0 40px rgba(6, 182, 212, 0.1),
+    0 8px 24px rgba(0, 0, 0, 0.3);
+  transition: transform 300ms ease, box-shadow 300ms ease, border-color 300ms ease;
+}
+.neon-cyan:hover {
+  transform: translateY(-3px);
+  border-color: rgba(6, 182, 212, 0.65);
+  box-shadow:
+    0 0 20px rgba(6, 182, 212, 0.35),
+    0 0 60px rgba(6, 182, 212, 0.15),
+    0 12px 32px rgba(0, 0, 0, 0.35);
+}
+
+/* -- room card: decorative only (layout via Tailwind) -- */
+.dash-room-card {
+  background: linear-gradient(135deg, rgba(20, 20, 28, 0.95) 0%, rgba(15, 15, 22, 0.85) 100%);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  transition: transform 300ms ease, box-shadow 300ms ease, border-color 300ms ease;
+  position: relative;
+  overflow: hidden;
+}
+.dash-room-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at 80% 50%, rgba(124, 58, 237, 0.06) 0%, transparent 70%);
+  pointer-events: none;
+}
+.dash-room-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(124, 58, 237, 0.3);
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.4),
+    0 0 20px rgba(124, 58, 237, 0.08);
+}
+/* Cyan variant for recently joined rooms */
+.dash-room-card-cyan::before {
+  background: radial-gradient(ellipse at 80% 50%, rgba(6, 182, 212, 0.06) 0%, transparent 70%);
+}
+.dash-room-card-cyan:hover {
+  border-color: rgba(6, 182, 212, 0.3);
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.4),
+    0 0 20px rgba(6, 182, 212, 0.08);
+}
+
+/* -- stagger animations -- */
+@keyframes dashFadeIn {
+  from { opacity: 0; transform: translateY(18px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.dash-s1 { animation: dashFadeIn 0.45s ease-out 0.05s both; }
+.dash-s2 { animation: dashFadeIn 0.45s ease-out 0.2s both; }
+.dash-s3 { animation: dashFadeIn 0.45s ease-out 0.35s both; }
+.dash-s4 { animation: dashFadeIn 0.45s ease-out 0.5s both; }

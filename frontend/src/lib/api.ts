@@ -20,6 +20,9 @@ export interface Room {
   mode: "open" | "listen_only";
   createdBy: string | null;
   createdAt: string;
+  currentSong?: { title: string; thumbnail: string | null } | null;
+  memberCount?: number;
+  liveListeners?: number;
 }
 
 export interface Song {
@@ -80,16 +83,20 @@ export async function login(email: string, password: string): Promise<AuthRespon
 }
 
 export async function googleAuth(accessToken: string): Promise<AuthResponse> {
-  const res = await fetch(`${API_URL}/auth/google`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ accessToken }),
-  });
-  if (!res.ok) {
-    const data = await res.json();
-    throw new Error(data.error || "Google authentication failed");
+  try {
+    const res = await fetch(`${API_URL}/auth/google`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ accessToken }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || "Google authentication failed");
+    }
+    return res.json();
+  } catch (err) {
+    throw err instanceof Error ? err : new Error("Google authentication failed");
   }
-  return res.json();
 }
 
 export async function getMe(): Promise<User> {
@@ -227,12 +234,16 @@ export async function searchYouTube(query: string): Promise<YouTubeResult[]> {
 // ---------- Songs ----------
 
 export async function getSongs(roomId: string): Promise<Song[]> {
-  const res = await fetch(`${API_URL}/rooms/${roomId}/songs`, {
-    headers: authHeaders(),
-    cache: "no-store",
-  });
-  if (!res.ok) throw new Error("Failed to fetch songs");
-  return res.json();
+  try {
+    const res = await fetch(`${API_URL}/rooms/${roomId}/songs`, {
+      headers: authHeaders(),
+      cache: "no-store",
+    });
+    if (!res.ok) return [];
+    return res.json();
+  } catch {
+    return [];
+  }
 }
 
 export async function addSong(

@@ -93,6 +93,78 @@ function initSockets(io) {
         currentTime: 0,
         updatedAt: Date.now(),
       });
+
+      // Notify dashboard watchers with updated song info
+      try {
+        const playing = await prisma.song.findFirst({
+          where: { roomId, isPlaying: true },
+          select: { title: true, thumbnail: true },
+        });
+        io.to(`dash:${roomId}`).emit("room-song-updated", {
+          roomId,
+          currentSong: playing || null,
+        });
+      } catch { /* non-critical */ }
+    });
+
+    // Song ended — any client can emit this to auto-advance the queue
+    // Uses a Redis lock to prevent duplicate skips from multiple clients
+    socket.on("song-ended", async ({ roomId }) => {
+      if (!roomId) return;
+      const lockKey = `room:${roomId}:skip-lock`;
+      try {
+        // Try to acquire a short-lived lock (2 seconds)
+        const acquired = redis ? await redis.set(lockKey, "1", "EX", 2, "NX") : true;
+        if (!acquired) return; // Another client already triggered the skip
+
+        // Mark current playing song as played
+        await prisma.song.updateMany({
+          where: { roomId, isPlaying: true },
+          data: { isPlaying: false, played: true },
+        });
+
+        // Find next unplayed song (highest upvotes first, then oldest)
+        const next = await prisma.song.findFirst({
+          where: { roomId, played: false },
+          orderBy: [{ upvotes: "desc" }, { createdAt: "asc" }],
+        });
+
+        if (next) {
+          await prisma.song.update({
+            where: { id: next.id },
+            data: { isPlaying: true },
+          });
+        }
+
+        // Reset playback state
+        await setPlaybackState(roomId, {
+          isPaused: false,
+          currentTime: 0,
+          updatedAt: Date.now(),
+        });
+
+        // Broadcast to all clients in the room
+        io.to(roomId).emit("queue-updated", { action: "playback" });
+        io.to(roomId).emit("playback-sync", {
+          isPaused: false,
+          currentTime: 0,
+          updatedAt: Date.now(),
+        });
+
+        // Notify dashboard watchers
+        try {
+          const playing = await prisma.song.findFirst({
+            where: { roomId, isPlaying: true },
+            select: { title: true, thumbnail: true },
+          });
+          io.to(`dash:${roomId}`).emit("room-song-updated", {
+            roomId,
+            currentSong: playing || null,
+          });
+        } catch { /* non-critical */ }
+      } catch (err) {
+        console.error("[Socket] song-ended auto-advance error:", err);
+      }
     });
 
     // Host play/pause — syncs playback state across all clients
@@ -135,6 +207,22 @@ function initSockets(io) {
         });
       } catch (err) {
         console.error("[Socket] Chat message save failed:", err);
+      }
+    });
+
+    // Dashboard: subscribe to live listener counts for multiple rooms
+    // Joins `dash:<roomId>` rooms so the socket is NOT counted as a room participant.
+    socket.on("subscribe-dashboard", ({ roomIds }) => {
+      if (!Array.isArray(roomIds)) return;
+      // Leave any previous dashboard subscriptions
+      for (const room of socket.rooms) {
+        if (typeof room === "string" && room.startsWith("dash:")) {
+          socket.leave(room);
+        }
+      }
+      // Join dashboard channels
+      for (const id of roomIds) {
+        socket.join(`dash:${id}`);
       }
     });
 
@@ -232,11 +320,34 @@ async function getRoomUsers(io, roomId) {
 }
 
 /**
- * Broadcast the current user list to everyone in the room.
+ * Broadcast the current user list to everyone in the room,
+ * and notify dashboard watchers with just the count.
+ * Auto-pauses playback when the room becomes empty.
  */
 async function broadcastRoomUsers(io, roomId) {
   const users = await getRoomUsers(io, roomId);
   io.to(roomId).emit("users-updated", users);
+
+  // Notify dashboard watchers (dash:<roomId>) with just the count
+  const onlineCount = users.filter((u) => !u.isOffline).length;
+  io.to(`dash:${roomId}`).emit("room-count-updated", {
+    roomId,
+    count: onlineCount,
+  });
+
+  // Auto-pause when room is empty (no online users)
+  if (onlineCount === 0) {
+    try {
+      const pbState = await getPlaybackState(roomId);
+      if (pbState && !pbState.isPaused) {
+        await setPlaybackState(roomId, {
+          isPaused: true,
+          currentTime: pbState.currentTime,
+          updatedAt: Date.now(),
+        });
+      }
+    } catch { /* non-critical */ }
+  }
 }
 
 module.exports = { initSockets };

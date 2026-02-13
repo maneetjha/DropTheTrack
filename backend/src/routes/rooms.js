@@ -56,15 +56,52 @@ router.post("/", requireAuth, async (req, res) => {
   }
 });
 
+// Helper: get live socket listener count for a room
+async function getLiveCount(io, roomId) {
+  if (!io) return 0;
+  try {
+    const sockets = await io.in(roomId).fetchSockets();
+    // Deduplicate by userId (a user could have multiple tabs)
+    const unique = new Set();
+    for (const s of sockets) {
+      unique.add(s.data.userId || s.id);
+    }
+    return unique.size;
+  } catch {
+    return 0;
+  }
+}
+
 // My rooms — rooms created by the current user (max 5)
 router.get("/mine", requireAuth, async (req, res) => {
   try {
+    const io = req.app.get("io");
     const rooms = await prisma.room.findMany({
       where: { createdBy: req.user.id },
       orderBy: { createdAt: "desc" },
       take: 5,
+      include: {
+        songs: {
+          where: { isPlaying: true },
+          take: 1,
+          select: { title: true, thumbnail: true },
+        },
+        _count: { select: { members: true } },
+      },
     });
-    res.json(rooms);
+    // Flatten: add currentSong + memberCount + liveListeners
+    const result = await Promise.all(
+      rooms.map(async (r) => {
+        const { songs, _count, ...room } = r;
+        return {
+          ...room,
+          currentSong: songs[0] || null,
+          memberCount: _count.members,
+          liveListeners: await getLiveCount(io, r.id),
+        };
+      })
+    );
+    res.json(result);
   } catch (err) {
     console.error("[Rooms] My rooms error:", err);
     res.status(500).json({ error: "Failed to fetch your rooms" });
@@ -82,10 +119,31 @@ router.get("/recent", requireAuth, async (req, res) => {
       orderBy: { joinedAt: "desc" },
       take: 10,
       include: {
-        room: true,
+        room: {
+          include: {
+            songs: {
+              where: { isPlaying: true },
+              take: 1,
+              select: { title: true, thumbnail: true },
+            },
+            _count: { select: { members: true } },
+          },
+        },
       },
     });
-    res.json(memberships.map((m) => m.room));
+    const io = req.app.get("io");
+    const result = await Promise.all(
+      memberships.map(async (m) => {
+        const { songs, _count, ...room } = m.room;
+        return {
+          ...room,
+          currentSong: songs[0] || null,
+          memberCount: _count.members,
+          liveListeners: await getLiveCount(io, m.room.id),
+        };
+      })
+    );
+    res.json(result);
   } catch (err) {
     console.error("[Rooms] Recent rooms error:", err);
     res.status(500).json({ error: "Failed to fetch recent rooms" });
