@@ -47,6 +47,9 @@ export default function YouTubePlayer({
   const [duration, setDuration] = useState(0);
   const [playerPaused, setPlayerPaused] = useState(false);
   const [isBuffering, setIsBuffering] = useState(false);
+  // Autoplay blocked (mobile Safari etc.) — show "Tap to play" overlay
+  const [autoplayBlocked, setAutoplayBlocked] = useState(false);
+  const autoplayTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Bumped each time a new player is created so the progress effect restarts
   const [playerGeneration, setPlayerGeneration] = useState(0);
   const progressInterval = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -76,9 +79,11 @@ export default function YouTubePlayer({
       }
       setReady(false);
       setPlayerPaused(false);
+      setAutoplayBlocked(false);
       setProgress(0);
       setDuration(0);
       hostPausedRef.current = false;
+      if (autoplayTimer.current) { clearTimeout(autoplayTimer.current); autoplayTimer.current = null; }
       return;
     }
 
@@ -136,6 +141,7 @@ export default function YouTubePlayer({
         events: {
           onReady: (e: any) => {
             setReady(true);
+            setAutoplayBlocked(false);
             setPlayerGeneration((g) => g + 1); // trigger progress interval restart
             e.target.setVolume(isMuted ? 0 : volume);
 
@@ -148,6 +154,19 @@ export default function YouTubePlayer({
             } else {
               hostPausedRef.current = false;
               e.target.playVideo();
+
+              // Detect autoplay being blocked (mobile Safari etc.)
+              // If the video hasn't started playing after 2s, show tap overlay
+              if (autoplayTimer.current) clearTimeout(autoplayTimer.current);
+              autoplayTimer.current = setTimeout(() => {
+                try {
+                  const state = e.target.getPlayerState();
+                  // -1 = unstarted, 5 = cued — both mean autoplay was blocked
+                  if (state === -1 || state === 5 || state === 2) {
+                    setAutoplayBlocked(true);
+                  }
+                } catch { /* player destroyed */ }
+              }, 2000);
             }
 
             setDuration(e.target.getDuration() || 0);
@@ -155,9 +174,11 @@ export default function YouTubePlayer({
           onStateChange: (e: any) => {
             const state = e.data;
             if (state === 1) {
-              // Playing
+              // Playing — autoplay succeeded or user tapped
               setIsBuffering(false);
               setPlayerPaused(false);
+              setAutoplayBlocked(false);
+              if (autoplayTimer.current) { clearTimeout(autoplayTimer.current); autoplayTimer.current = null; }
               setDuration(e.target.getDuration() || 0);
             } else if (state === 2) {
               // Paused — only stay paused if host intended it
@@ -365,7 +386,34 @@ export default function YouTubePlayer({
             </p>
           </div>
         )}
-        {!playerPaused && <div className="absolute inset-0 z-10" />}
+        {/* Autoplay blocked overlay — mobile browsers */}
+        {autoplayBlocked && ready && !playerPaused && (
+          <button
+            onClick={() => {
+              try {
+                const p = playerRef.current;
+                if (!p) return;
+                // Sync to current live position before playing
+                if (syncState && !syncState.isPaused) {
+                  const elapsed = (Date.now() - syncState.updatedAt) / 1000;
+                  p.seekTo(syncState.currentTime + elapsed, true);
+                }
+                p.playVideo();
+                setAutoplayBlocked(false);
+              } catch { /* noop */ }
+            }}
+            className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/70 backdrop-blur-[2px]"
+          >
+            <div className="mb-3 flex h-16 w-16 items-center justify-center rounded-full bg-[var(--brand)] shadow-lg shadow-[var(--brand-glow)]">
+              <svg className="ml-1 h-7 w-7 text-white" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M8 5v14l11-7z" />
+              </svg>
+            </div>
+            <p className="text-sm font-semibold text-white">Tap to play</p>
+            <p className="mt-1 text-[11px] text-white/50">Your browser requires a tap to start audio</p>
+          </button>
+        )}
+        {!playerPaused && !autoplayBlocked && <div className="absolute inset-0 z-10" />}
       </div>
 
       {/* Song Info — centered, Space Grotesk */}
