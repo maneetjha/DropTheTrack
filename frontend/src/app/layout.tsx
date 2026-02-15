@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Inter, Space_Grotesk } from "next/font/google";
 import { AuthProvider } from "@/lib/auth-context";
 import "./globals.css";
@@ -19,12 +19,13 @@ export const metadata: Metadata = {
   title: "DropTheTrack — Collaborative Music Queue",
   description:
     "Create a room, add songs, upvote your favorites, and let the crowd decide what plays next.",
-  viewport: {
-    width: "device-width",
-    initialScale: 1,
-    maximumScale: 1,
-    interactiveWidget: "resizes-content",
-  },
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  interactiveWidget: "resizes-content",
 };
 
 export default function RootLayout({

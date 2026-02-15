@@ -119,9 +119,9 @@ export default function RoomChat({ roomId, currentUserId, fullHeight }: RoomChat
       </div>
 
       {/* Input */}
-      <div className="shrink-0 border-t border-[var(--border)] bg-[var(--surface)] px-4 py-3">
+      <div className="shrink-0 overflow-hidden border-t border-[var(--border)] bg-[var(--surface)] px-3 py-3">
         {currentUserId ? (
-          <div className="flex items-center gap-2">
+          <div className="flex w-full items-center gap-2 overflow-hidden">
             <input
               ref={inputRef}
               type="text"
@@ -131,7 +131,7 @@ export default function RoomChat({ roomId, currentUserId, fullHeight }: RoomChat
               placeholder="Type a message..."
               maxLength={500}
               enterKeyHint="send"
-              className="h-10 flex-1 rounded-full border border-[var(--border)] bg-[var(--background)] px-4 text-[14px] text-[var(--text-primary)] placeholder-[var(--text-muted)] outline-none transition focus:border-[var(--brand)] focus:shadow-[0_0_0_3px_var(--brand-glow)]"
+              className="h-10 min-w-0 flex-1 rounded-full border border-[var(--border)] bg-[var(--background)] px-4 text-[14px] text-[var(--text-primary)] placeholder-[var(--text-muted)] outline-none transition focus:border-[var(--brand)] focus:shadow-[0_0_0_3px_var(--brand-glow)]"
             />
             <button
               onClick={sendMessage}
