@@ -73,11 +73,9 @@ export default function RoomList() {
         mounted = false;
         socket.off("room-count-updated", handleCountUpdate);
         socket.off("room-song-updated", handleSongUpdate);
-        // Leave dashboard channels
+        // Unsubscribe from dashboard channels
         if (subscribedRef.current) {
-          for (const room of socket.rooms ?? []) {
-            // client-side socket.rooms isn't always available, so just disconnect cleanly
-          }
+          socket.emit("unsubscribe-dashboard");
         }
       };
     })();
