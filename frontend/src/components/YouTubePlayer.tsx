@@ -293,7 +293,15 @@ export default function YouTubePlayer({
   const handleVolume = useCallback((val: number) => {
     setVolume(val);
     setIsMuted(val === 0);
-    if (playerRef.current) playerRef.current.setVolume(val);
+    if (playerRef.current) {
+      playerRef.current.setVolume(val);
+      // On mobile, setVolume may not work — use mute/unMute as fallback
+      if (val === 0) {
+        playerRef.current.mute();
+      } else {
+        playerRef.current.unMute();
+      }
+    }
   }, []);
 
   const toggleMute = useCallback(() => {
@@ -301,12 +309,17 @@ export default function YouTubePlayer({
       const restored = prevVolume.current > 0 ? prevVolume.current : 80;
       setVolume(restored);
       setIsMuted(false);
-      if (playerRef.current) playerRef.current.setVolume(restored);
+      if (playerRef.current) {
+        playerRef.current.unMute();
+        playerRef.current.setVolume(restored);
+      }
     } else {
       prevVolume.current = volume;
       setVolume(0);
       setIsMuted(true);
-      if (playerRef.current) playerRef.current.setVolume(0);
+      if (playerRef.current) {
+        playerRef.current.mute();
+      }
     }
   }, [isMuted, volume]);
 

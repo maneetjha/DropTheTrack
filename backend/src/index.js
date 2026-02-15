@@ -21,7 +21,14 @@ const app = express();
 const server = http.createServer(app);
 
 // ---------- Middleware ----------
-app.use(cors({ origin: process.env.CORS_ORIGIN || "*" }));
+// Support comma-separated CORS origins (e.g. "https://a.vercel.app,https://b.vercel.app")
+const corsOrigin = process.env.CORS_ORIGIN || "*";
+const allowedOrigins = corsOrigin === "*" ? "*" : corsOrigin.split(",").map((o) => o.trim());
+app.use(
+  cors({
+    origin: allowedOrigins.length === 1 ? allowedOrigins[0] : allowedOrigins,
+  })
+);
 app.use(express.json());
 
 // --- Global rate limit: 500 requests per 15 min per IP ---
@@ -65,7 +72,7 @@ app.use("/api/rooms", messagesRouter);  // GET /api/rooms/:roomId/messages
 // ---------- Socket.io ----------
 const io = new Server(server, {
   cors: {
-    origin: process.env.CORS_ORIGIN || "*",
+    origin: allowedOrigins.length === 1 ? allowedOrigins[0] : allowedOrigins,
     methods: ["GET", "POST"],
   },
 });
