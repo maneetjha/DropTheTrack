@@ -5,26 +5,6 @@ import { getMessages, ChatMessage } from "@/lib/api";
 import { getSocket } from "@/lib/socket";
 import { SendHorizontal } from "lucide-react";
 
-/** Hook to track visual viewport height (shrinks when mobile keyboard opens) */
-function useVisualViewportHeight() {
-  const [offset, setOffset] = useState(0);
-  useEffect(() => {
-    const vv = typeof window !== "undefined" ? window.visualViewport : null;
-    if (!vv) return;
-    const update = () => {
-      // offset = how much the keyboard is eating from the bottom
-      setOffset(window.innerHeight - vv.height);
-    };
-    vv.addEventListener("resize", update);
-    vv.addEventListener("scroll", update);
-    return () => {
-      vv.removeEventListener("resize", update);
-      vv.removeEventListener("scroll", update);
-    };
-  }, []);
-  return offset;
-}
-
 interface RoomChatProps {
   roomId: string;
   currentUserId: string | null;
@@ -53,7 +33,6 @@ export default function RoomChat({ roomId, currentUserId, fullHeight }: RoomChat
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const userScrolledUp = useRef(false);
-  const keyboardOffset = useVisualViewportHeight();
 
   useEffect(() => {
     getMessages(roomId).then(setMessages).catch(() => {});
@@ -139,11 +118,8 @@ export default function RoomChat({ roomId, currentUserId, fullHeight }: RoomChat
         {messages.map(renderMessage)}
       </div>
 
-      {/* Input — adjusts position when mobile keyboard opens */}
-      <div
-        className="shrink-0 border-t border-[var(--border)] bg-[var(--surface)] px-4 py-3 transition-transform duration-100"
-        style={keyboardOffset > 0 ? { transform: `translateY(-${keyboardOffset}px)` } : undefined}
-      >
+      {/* Input */}
+      <div className="shrink-0 border-t border-[var(--border)] bg-[var(--surface)] px-4 py-3">
         {currentUserId ? (
           <div className="flex items-center gap-2">
             <input

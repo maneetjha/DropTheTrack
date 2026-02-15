@@ -63,7 +63,7 @@ export default function RoomPage() {
   const [searching, setSearching] = useState(false);
   const [addingVideoId, setAddingVideoId] = useState<string | null>(null);
   const searchRef = useRef<HTMLDivElement>(null);
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // debounceRef removed — search now triggers on Enter only
   const usersRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -131,17 +131,20 @@ export default function RoomPage() {
   }, [isDesktop, mobileTab, showChatSlide]);
 
   // ---- Handlers ----
-  const handleSearchChange = (v: string) => { setSearchQuery(v); if (debounceRef.current) clearTimeout(debounceRef.current); if (!v.trim()) { setSearchResults([]); setSearching(false); return; } setSearching(true); debounceRef.current = setTimeout(async () => { try { setSearchResults(await searchYouTube(v.trim())); } catch { setSearchResults([]); } finally { setSearching(false); } }, 300); };
+  const handleSearchChange = (v: string) => { setSearchQuery(v); if (!v.trim()) { setSearchResults([]); setSearching(false); } };
+  const executeSearch = async () => { const q = searchQuery.trim(); if (!q) return; setSearching(true); try { setSearchResults(await searchYouTube(q)); } catch { setSearchResults([]); } finally { setSearching(false); } };
   const sortSongs = (list: Song[]) => [...list].sort((a, b) => b.upvotes - a.upvotes || new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
   const handleSelectResult = async (r: YouTubeResult) => { if (!id) return; setAddingVideoId(r.videoId); try { const t = r.title.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'"); const s = await addSong(id, { title: t, url: `https://www.youtube.com/watch?v=${r.videoId}`, thumbnail: r.thumbnail || undefined }); setSongs((p) => sortSongs([...p, s])); setSearchQuery(""); setSearchResults([]); getSocket().emit("song-added", { roomId: id, song: s }); } catch { setModal({ title: "Oops", message: "Failed to add song.", type: "error" }); } finally { setAddingVideoId(null); } };
   const handleUpvote = async (songId: string) => { if (!user) { setModal({ title: "Login required", message: "Please log in to vote.", type: "info" }); return; } setSongs((p) => sortSongs(p.map((s) => s.id !== songId ? s : { ...s, hasVoted: !s.hasVoted, upvotes: s.hasVoted ? s.upvotes - 1 : s.upvotes + 1 }))); try { const u = await upvoteSong(songId); setSongs((p) => sortSongs(p.map((s) => (s.id === songId ? u : s)))); getSocket().emit("song-upvoted", { roomId: id, songId, upvotes: u.upvotes }); } catch (e: unknown) { fetchSongs(); if (e instanceof Error && e.message === "Login required") setModal({ title: "Login required", message: "Please log in to vote.", type: "info" }); } };
   const handleRemoveSong = async (songId: string) => { try { await removeSong(songId); setSongs((p) => p.filter((s) => s.id !== songId)); getSocket().emit("song-removed", { roomId: id, songId }); } catch (e) { setModal({ title: "Error", message: e instanceof Error ? e.message : "Failed to remove", type: "error" }); } };
   const handlePlaySong = async (songId: string) => { if (!id) return; try { await playSong(songId); await fetchSongs(); getSocket().emit("playback-changed", { roomId: id }); } catch (e) { setModal({ title: "Error", message: e instanceof Error ? e.message : "Failed to play", type: "error" }); } };
-  const handleSkipSong = useCallback(async () => { if (!id) return; try { const u = await skipSong(id); setSongs(u); getSocket().emit("playback-changed", { roomId: id }); } catch (e) { console.error("Skip failed:", e); } }, [id]);
+  const handleSkipSong = useCallback(async () => { if (!id) return; /* Immediately clear the now-playing song to stop the player instantly */ setSongs((prev) => prev.map((s) => s.isPlaying ? { ...s, isPlaying: false } : s)); try { const u = await skipSong(id); setSongs(u); getSocket().emit("playback-changed", { roomId: id }); } catch (e) { console.error("Skip failed:", e); } }, [id]);
   const isCreatorRef = useRef(false);
   // When a song ends, any client emits song-ended — backend handles the skip with a lock
   const handleSongEnd = useCallback(() => {
     if (!id) return;
+    // Immediately clear the current song so the player stops instantly (no brief replay)
+    setSongs((prev) => prev.map((s) => s.isPlaying ? { ...s, isPlaying: false } : s));
     getSocket().emit("song-ended", { roomId: id });
   }, [id]);
   const handleHostPlayback = useCallback((isPaused: boolean, currentTime: number) => { if (!id) return; getSocket().emit("host-playback", { roomId: id, isPaused, currentTime }); }, [id]);
@@ -264,7 +267,7 @@ export default function RoomPage() {
               <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
                 {searching ? <div className="h-4 w-4 animate-spin rounded-full border-2 border-[var(--brand)] border-t-transparent" /> : <Search className="h-4 w-4 text-[var(--text-muted)]" />}
               </div>
-              <input type="text" value={searchQuery} onChange={(e) => handleSearchChange(e.target.value)} placeholder="Search YouTube for a song..." className="h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] pl-10 pr-9 text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] outline-none transition focus:border-[var(--brand)] focus:shadow-[0_0_0_3px_var(--brand-glow)]" />
+              <input type="text" value={searchQuery} onChange={(e) => handleSearchChange(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); executeSearch(); } }} enterKeyHint="search" placeholder="Search YouTube for a song..." className="h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] pl-10 pr-9 text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] outline-none transition focus:border-[var(--brand)] focus:shadow-[0_0_0_3px_var(--brand-glow)]" />
               {searchQuery && <button onClick={() => { setSearchQuery(""); setSearchResults([]); }} className="absolute inset-y-0 right-0 flex items-center pr-3 text-[var(--text-muted)] hover:text-[var(--text-primary)]"><X className="h-4 w-4" /></button>}
             </div>
             {searchResults.length > 0 && (
@@ -529,7 +532,7 @@ export default function RoomPage() {
           <div className={`absolute inset-0 overflow-y-auto pb-14 pt-12 ${mobileTab === "player" ? "z-10" : "z-0 pointer-events-none -translate-x-full"}`}>
             {playerPanelContent}
           </div>
-          <div className={`absolute inset-0 overflow-y-auto pb-14 pt-12 ${mobileTab === "chat" ? "z-10" : "z-0 pointer-events-none -translate-x-full"}`}>
+          <div className={`absolute inset-0 pb-14 pt-12 ${mobileTab === "chat" ? "z-10" : "z-0 pointer-events-none -translate-x-full"}`}>
             {id && <RoomChat roomId={id} currentUserId={user?.id || null} fullHeight />}
           </div>
           {/* Bottom tab bar */}
