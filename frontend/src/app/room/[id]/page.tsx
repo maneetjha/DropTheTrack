@@ -138,13 +138,13 @@ export default function RoomPage() {
   const handleUpvote = async (songId: string) => { if (!user) { setModal({ title: "Login required", message: "Please log in to vote.", type: "info" }); return; } setSongs((p) => sortSongs(p.map((s) => s.id !== songId ? s : { ...s, hasVoted: !s.hasVoted, upvotes: s.hasVoted ? s.upvotes - 1 : s.upvotes + 1 }))); try { const u = await upvoteSong(songId); setSongs((p) => sortSongs(p.map((s) => (s.id === songId ? u : s)))); getSocket().emit("song-upvoted", { roomId: id, songId, upvotes: u.upvotes }); } catch (e: unknown) { fetchSongs(); if (e instanceof Error && e.message === "Login required") setModal({ title: "Login required", message: "Please log in to vote.", type: "info" }); } };
   const handleRemoveSong = async (songId: string) => { try { await removeSong(songId); setSongs((p) => p.filter((s) => s.id !== songId)); getSocket().emit("song-removed", { roomId: id, songId }); } catch (e) { setModal({ title: "Error", message: e instanceof Error ? e.message : "Failed to remove", type: "error" }); } };
   const handlePlaySong = async (songId: string) => { if (!id) return; try { await playSong(songId); await fetchSongs(); getSocket().emit("playback-changed", { roomId: id }); } catch (e) { setModal({ title: "Error", message: e instanceof Error ? e.message : "Failed to play", type: "error" }); } };
-  const handleSkipSong = useCallback(async () => { if (!id) return; /* Immediately clear the now-playing song to stop the player instantly */ setSongs((prev) => prev.map((s) => s.isPlaying ? { ...s, isPlaying: false } : s)); try { const u = await skipSong(id); setSongs(u); getSocket().emit("playback-changed", { roomId: id }); } catch (e) { console.error("Skip failed:", e); } }, [id]);
+  const handleSkipSong = useCallback(async () => { if (!id) return; /* Immediately mark song as played so it disappears from queue + stops the player */ setSongs((prev) => prev.map((s) => s.isPlaying ? { ...s, isPlaying: false, played: true } : s)); try { const u = await skipSong(id); setSongs(u); getSocket().emit("playback-changed", { roomId: id }); } catch (e) { console.error("Skip failed:", e); } }, [id]);
   const isCreatorRef = useRef(false);
   // When a song ends, any client emits song-ended — backend handles the skip with a lock
   const handleSongEnd = useCallback(() => {
     if (!id) return;
-    // Immediately clear the current song so the player stops instantly (no brief replay)
-    setSongs((prev) => prev.map((s) => s.isPlaying ? { ...s, isPlaying: false } : s));
+    // Immediately mark as played so it disappears from queue + stops the player
+    setSongs((prev) => prev.map((s) => s.isPlaying ? { ...s, isPlaying: false, played: true } : s));
     getSocket().emit("song-ended", { roomId: id });
   }, [id]);
   const handleHostPlayback = useCallback((isPaused: boolean, currentTime: number) => { if (!id) return; getSocket().emit("host-playback", { roomId: id, isPaused, currentTime }); }, [id]);
@@ -159,7 +159,7 @@ export default function RoomPage() {
   const isListenOnly = room?.mode === "listen_only";
   const canAddSongs = !!(user && (!isListenOnly || isCreator));
   const nowPlaying = songs.find((s) => s.isPlaying) || null;
-  const queue = songs.filter((s) => !s.isPlaying);
+  const queue = songs.filter((s) => !s.isPlaying && !s.played);
   const currentVideoId = nowPlaying ? extractVideoId(nowPlaying.url) : null;
 
   // ---- Loading / Not found ----
@@ -186,9 +186,9 @@ export default function RoomPage() {
   // QUEUE PANEL CONTENT
   // ==================================================================
   const queuePanelContent = (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full flex-col overflow-hidden">
       {/* Room Info */}
-      <section className="shrink-0 p-5 pb-0">
+      <section className="relative z-30 shrink-0 overflow-visible p-5 pb-0">
         {/* Row 1: Room name + code & menu on the right */}
         <div className="flex items-start justify-between gap-3">
           <h1 className="font-display text-[32px] font-bold leading-tight text-[var(--text-primary)]">{room.name}</h1>
@@ -460,7 +460,7 @@ export default function RoomPage() {
       {isDesktop ? (
         <div className="flex flex-1 overflow-hidden pt-14">
           {/* Queue Panel */}
-          <aside className={`shrink-0 border-r border-[var(--border)] overflow-hidden transition-[width] duration-300 ease-in-out ${chatCollapsed ? "w-[38%]" : "w-[32%] max-w-[480px]"}`}>
+          <aside className={`shrink-0 border-r border-[var(--border)] overflow-visible transition-[width] duration-300 ease-in-out ${chatCollapsed ? "w-[38%]" : "w-[32%] max-w-[480px]"}`}>
             {queuePanelContent}
           </aside>
           {/* Now Playing Panel */}
@@ -499,7 +499,7 @@ export default function RoomPage() {
       /* ===== TABLET 768-1023px: 2 columns + slide-over chat ===== */
       ) : isTablet ? (
         <div className="flex flex-1 overflow-hidden pt-14">
-          <aside className="w-[300px] shrink-0 border-r border-[var(--border)] overflow-hidden">
+          <aside className="w-[300px] shrink-0 border-r border-[var(--border)] overflow-visible">
             {queuePanelContent}
           </aside>
           <main className="flex-1 min-w-0 overflow-y-auto relative">
