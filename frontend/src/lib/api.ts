@@ -1,4 +1,5 @@
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000/api";
+const API_ORIGIN = API_URL.replace(/\/api\/?$/, "");
 
 // ---------- Types ----------
 
@@ -6,6 +7,8 @@ export interface User {
   id: string;
   name: string;
   email: string;
+  avatarUrl?: string | null;
+  createdAt?: string;
 }
 
 export interface AuthResponse {
@@ -40,6 +43,38 @@ export interface Song {
   createdAt: string;
 }
 
+// ---------- Library ----------
+
+export interface LibraryItem {
+  id: string;
+  userId: string;
+  title: string;
+  url: string;
+  thumbnail: string | null;
+  createdAt: string;
+}
+
+// ---------- Playlists (library folders) ----------
+
+export interface Playlist {
+  id: string;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+  itemCount: number;
+  /** Up to 4 thumbnail URLs for mosaic cover (first tracks, oldest first). */
+  coverThumbnails?: (string | null)[];
+}
+
+export interface PlaylistItem {
+  id: string;
+  playlistId: string;
+  title: string;
+  url: string;
+  thumbnail: string | null;
+  createdAt: string;
+}
+
 // ---------- Helpers ----------
 
 function getToken(): string | null {
@@ -52,6 +87,19 @@ function authHeaders(): Record<string, string> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (token) headers["Authorization"] = `Bearer ${token}`;
   return headers;
+}
+
+function authHeaderOnly(): Record<string, string> {
+  const token = getToken();
+  const headers: Record<string, string> = {};
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  return headers;
+}
+
+export function resolveAssetUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  if (url.startsWith("http://") || url.startsWith("https://")) return url;
+  return `${API_ORIGIN}${url.startsWith("/") ? "" : "/"}${url}`;
 }
 
 // ---------- Auth ----------
@@ -106,6 +154,30 @@ export async function getMe(): Promise<User> {
   });
   if (!res.ok) throw new Error("Not authenticated");
   return res.json();
+}
+
+export async function updateMe(input: { name?: string }): Promise<User> {
+  const res = await fetch(`${API_URL}/users/me`, {
+    method: "PATCH",
+    headers: authHeaders(),
+    body: JSON.stringify(input),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || "Failed to update profile");
+  return data;
+}
+
+export async function uploadAvatar(file: File): Promise<User> {
+  const fd = new FormData();
+  fd.append("avatar", file);
+  const res = await fetch(`${API_URL}/users/me/avatar`, {
+    method: "POST",
+    headers: authHeaderOnly(),
+    body: fd,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || "Failed to upload avatar");
+  return data;
 }
 
 // ---------- Rooms ----------
@@ -198,6 +270,9 @@ export interface ChatMessage {
   text: string;
   userId: string;
   userName: string;
+  userAvatarUrl?: string | null;
+  replyTo?: { id: string; userName: string; text: string } | null;
+  meta?: any;
   createdAt: string;
 }
 
@@ -217,6 +292,8 @@ export interface YouTubeResult {
   title: string;
   thumbnail: string | null;
   channelTitle: string;
+  /** Formatted length e.g. "3:45" when available */
+  duration?: string | null;
 }
 
 export async function searchYouTube(query: string): Promise<YouTubeResult[]> {
@@ -229,6 +306,19 @@ export async function searchYouTube(query: string): Promise<YouTubeResult[]> {
     throw new Error(data.error || "YouTube search failed");
   }
   return res.json();
+}
+
+/** Resolve a pasted watch URL, youtu.be link, shorts URL, or raw video id */
+export async function resolveYouTube(query: string): Promise<YouTubeResult> {
+  const res = await fetch(`${API_URL}/youtube/resolve?q=${encodeURIComponent(query.trim())}`, {
+    headers: authHeaders(),
+    cache: "no-store",
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.error || "Could not resolve that link");
+  }
+  return data as YouTubeResult;
 }
 
 // ---------- Songs ----------
@@ -313,6 +403,159 @@ export async function skipSong(roomId: string): Promise<Song[]> {
   if (!res.ok) {
     const data = await res.json();
     throw new Error(data.error || "Failed to skip song");
+  }
+  return res.json();
+}
+
+export async function getLibrary(): Promise<LibraryItem[]> {
+  const res = await fetch(`${API_URL}/library`, {
+    headers: authHeaders(),
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    if (res.status === 401) throw new Error("Login required");
+    throw new Error("Failed to fetch library");
+  }
+  return res.json();
+}
+
+export async function saveToLibrary(input: { title: string; url: string; thumbnail?: string | null }): Promise<LibraryItem> {
+  const res = await fetch(`${API_URL}/library`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify({
+      title: input.title,
+      url: input.url,
+      thumbnail: input.thumbnail || null,
+    }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 401) throw new Error("Login required");
+    throw new Error(data.error || "Failed to save");
+  }
+  return res.json();
+}
+
+export async function removeFromLibrary(id: string): Promise<void> {
+  const res = await fetch(`${API_URL}/library/${id}`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 401) throw new Error("Login required");
+    throw new Error(data.error || "Failed to remove");
+  }
+}
+
+export async function getPlaylists(): Promise<Playlist[]> {
+  const res = await fetch(`${API_URL}/playlists`, {
+    headers: authHeaders(),
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 401) throw new Error("Login required");
+    throw new Error(data.error || "Failed to fetch playlists");
+  }
+  return res.json();
+}
+
+export async function createPlaylist(name: string): Promise<Playlist> {
+  const res = await fetch(`${API_URL}/playlists`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 401) throw new Error("Login required");
+    throw new Error(data.error || "Failed to create playlist");
+  }
+  const p = await res.json();
+  return { ...p, itemCount: p.itemCount ?? 0 };
+}
+
+export async function renamePlaylist(id: string, name: string): Promise<Playlist> {
+  const res = await fetch(`${API_URL}/playlists/${id}`, {
+    method: "PATCH",
+    headers: authHeaders(),
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 401) throw new Error("Login required");
+    throw new Error(data.error || "Failed to rename playlist");
+  }
+  const p = await res.json();
+  return { ...p, itemCount: p.itemCount ?? 0 };
+}
+
+export async function deletePlaylist(id: string): Promise<void> {
+  const res = await fetch(`${API_URL}/playlists/${id}`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 401) throw new Error("Login required");
+    throw new Error(data.error || "Failed to delete playlist");
+  }
+}
+
+export async function getPlaylistItems(id: string): Promise<{ playlist: { id: string; name: string }; items: PlaylistItem[] }> {
+  const res = await fetch(`${API_URL}/playlists/${id}/items`, {
+    headers: authHeaders(),
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 401) throw new Error("Login required");
+    throw new Error(data.error || "Failed to fetch playlist");
+  }
+  return res.json();
+}
+
+export async function addPlaylistItem(
+  playlistId: string,
+  input: { title: string; url: string; thumbnail?: string | null },
+): Promise<PlaylistItem> {
+  const res = await fetch(`${API_URL}/playlists/${playlistId}/items`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify({ title: input.title, url: input.url, thumbnail: input.thumbnail || null }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 401) throw new Error("Login required");
+    throw new Error(data.error || "Failed to add to playlist");
+  }
+  return res.json();
+}
+
+export async function removePlaylistItem(playlistId: string, itemId: string): Promise<void> {
+  const res = await fetch(`${API_URL}/playlists/${playlistId}/items/${itemId}`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 401) throw new Error("Login required");
+    throw new Error(data.error || "Failed to remove item");
+  }
+}
+
+export async function importYouTubePlaylist(url: string): Promise<Playlist> {
+  const res = await fetch(`${API_URL}/playlists/import`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify({ url }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 401) throw new Error("Login required");
+    throw new Error(data.error || "Failed to import playlist");
   }
   return res.json();
 }

@@ -14,6 +14,10 @@ const roomsRouter = require("./routes/rooms");
 const songsRouter = require("./routes/songs");
 const youtubeRouter = require("./routes/youtube");
 const messagesRouter = require("./routes/messages");
+const libraryRouter = require("./routes/library");
+const playlistsRouter = require("./routes/playlists");
+const usersRouter = require("./routes/users");
+const path = require("path");
 
 const rateLimit = require("express-rate-limit");
 
@@ -66,8 +70,14 @@ app.use("/api/auth", authLimiter, authRouter);       // POST /api/auth/register,
 app.use("/api/rooms", roomsRouter);     // POST / GET /api/rooms
 app.use("/api/rooms", songsRouter);     // POST / GET /api/rooms/:roomId/songs
 app.use("/api", songsRouter);           // POST /api/songs/:songId/upvote
-app.use("/api/youtube", searchLimiter, youtubeRouter); // GET /api/youtube/search?q=...
+app.use("/api/youtube", searchLimiter, youtubeRouter); // GET /api/youtube/search | /resolve
 app.use("/api/rooms", messagesRouter);  // GET /api/rooms/:roomId/messages
+app.use("/api/library", libraryRouter); // GET/POST/DELETE /api/library
+app.use("/api/playlists", playlistsRouter); // Playlists-only library
+app.use("/api/users", usersRouter); // Profile updates + avatar upload
+
+// Serve uploaded assets
+app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
 
 // ---------- Socket.io ----------
 const io = new Server(server, {
@@ -107,13 +117,38 @@ async function start() {
     // Start scheduled jobs
     startCleanupCron();
 
-    server.listen(PORT, () => {
-      console.log(`\n🎵 DropTheTrack backend running on http://localhost:${PORT}`);
-      console.log(`   Health check: http://localhost:${PORT}/api/ping`);
-      console.log(`   Prisma Studio: npx prisma studio\n`);
+    // listen() reports failures via 'error' event, not thrown — wrap so try/catch covers it
+    await new Promise((resolve, reject) => {
+      const onError = (err) => {
+        server.off("listening", onListening);
+        reject(err);
+      };
+      const onListening = () => {
+        server.off("error", onError);
+        resolve();
+      };
+      server.once("error", onError);
+      server.once("listening", onListening);
+      server.listen(PORT);
     });
+
+    console.log(`\n🎵 DropTheTrack backend running on http://localhost:${PORT}`);
+    console.log(`   Health check: http://localhost:${PORT}/api/ping`);
+    console.log(`   Prisma Studio: npx prisma studio\n`);
   } catch (err) {
-    console.error("Failed to start server:", err);
+    const code = err && err.code;
+    if (code === "EADDRINUSE") {
+      console.error(
+        `[Server] Port ${PORT} is already in use. Stop the other backend (e.g. kill the process using that port) or set PORT in .env.`
+      );
+    } else {
+      console.error("[Server] Failed to start:", err.message || err);
+    }
+    try {
+      await prisma.$disconnect();
+    } catch {
+      /* ignore */
+    }
     process.exit(1);
   }
 }
@@ -132,11 +167,14 @@ process.on("SIGTERM", async () => {
 });
 
 process.on("unhandledRejection", (reason) => {
-  console.error("[Fatal] Unhandled Promise Rejection:", reason);
+  const msg = reason instanceof Error ? reason.message : String(reason);
+  console.error("[Fatal] Unhandled Promise Rejection:", msg);
+  if (reason instanceof Error && reason.stack) console.error(reason.stack);
 });
 
 process.on("uncaughtException", (err) => {
-  console.error("[Fatal] Uncaught Exception:", err);
+  console.error("[Fatal] Uncaught Exception:", err.message || String(err));
+  if (err.stack) console.error(err.stack);
   process.exit(1);
 });
 

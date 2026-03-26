@@ -33,7 +33,7 @@ router.post("/register", async (req, res) => {
 
     res.status(201).json({
       token,
-      user: { id: user.id, name: user.name, email: user.email },
+      user: { id: user.id, name: user.name, email: user.email, avatarUrl: user.avatarUrl || null, createdAt: user.createdAt },
     });
   } catch (err) {
     console.error("[Auth] Register error:", err);
@@ -67,7 +67,7 @@ router.post("/login", async (req, res) => {
 
     res.json({
       token,
-      user: { id: user.id, name: user.name, email: user.email },
+      user: { id: user.id, name: user.name, email: user.email, avatarUrl: user.avatarUrl || null, createdAt: user.createdAt },
     });
   } catch (err) {
     console.error("[Auth] Login error:", err);
@@ -119,7 +119,7 @@ router.post("/google", async (req, res) => {
 
     res.json({
       token,
-      user: { id: user.id, name: user.name, email: user.email },
+      user: { id: user.id, name: user.name, email: user.email, avatarUrl: user.avatarUrl || null, createdAt: user.createdAt },
     });
   } catch (err) {
     console.error("[Auth] Google error:", err);
@@ -132,7 +132,7 @@ router.get("/me", requireAuth, async (req, res) => {
   try {
     const user = await prisma.user.findUnique({
       where: { id: req.user.id },
-      select: { id: true, name: true, email: true, createdAt: true },
+      select: { id: true, name: true, email: true, avatarUrl: true, createdAt: true },
     });
 
     if (!user) {

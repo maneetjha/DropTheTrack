@@ -22,7 +22,7 @@ declare global {
   }
 }
 
-export default function GoogleSignInButton() {
+export default function GoogleSignInButton({ variant = "dark" }: { variant?: "dark" | "aurora" | "duotone" }) {
   const { loginWithGoogle } = useAuth();
   const router = useRouter();
   const [loading, setLoading] = useState(false);
@@ -84,10 +84,14 @@ export default function GoogleSignInButton() {
         type="button"
         onClick={handleClick}
         disabled={loading}
-        className="btn-ripple flex w-full items-center justify-center gap-3 rounded-full border-2 border-white/10 bg-white/[0.03] px-6 py-3 font-semibold text-[var(--text-light)] transition-all hover:border-white/20 hover:bg-white/[0.06] disabled:opacity-50"
+        className={`btn-ripple flex w-full items-center justify-center gap-3 rounded-full px-6 py-3 font-semibold transition-all disabled:opacity-50 ${
+          variant === "aurora" || variant === "duotone"
+            ? "border border-black/10 bg-white/55 text-ink hover:bg-white/75"
+            : "border-2 border-white/10 bg-white/[0.03] text-[var(--text-light)] hover:border-white/20 hover:bg-white/[0.06]"
+        }`}
       >
         {loading ? (
-          <div className="h-5 w-5 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+          <div className={`h-5 w-5 animate-spin rounded-full border-2 ${variant === "aurora" || variant === "duotone" ? "border-black/20 border-t-black/60" : "border-white/30 border-t-white"}`} />
         ) : (
           <svg className="h-5 w-5" viewBox="0 0 24 24">
             <path

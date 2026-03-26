@@ -1,6 +1,7 @@
 const { Router } = require("express");
 const prisma = require("../config/db");
 const { requireAuth, optionalAuth } = require("../middleware/auth");
+const { finalizeSongAddBroadcast } = require("../sockets");
 
 const router = Router();
 
@@ -35,7 +36,14 @@ router.post("/:roomId/songs", requireAuth, async (req, res) => {
         user: { select: { id: true, name: true } },
       },
     });
-    res.status(201).json({ ...song, hasVoted: false });
+
+    await finalizeSongAddBroadcast(roomId, song.id);
+
+    const fresh = await prisma.song.findUnique({
+      where: { id: song.id },
+      include: { user: { select: { id: true, name: true } } },
+    });
+    res.status(201).json({ ...fresh, hasVoted: false });
   } catch (err) {
     console.error("[Songs] Add error:", err);
     res.status(500).json({ error: "Failed to add song" });

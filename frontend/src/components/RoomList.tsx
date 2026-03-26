@@ -3,6 +3,7 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import { getMyRooms, getRecentRooms, Room } from "@/lib/api";
 import { getSocket } from "@/lib/socket";
 import RoomCard from "./RoomCard";
+import { Home as HomeIcon, History } from "lucide-react";
 
 export default function RoomList() {
   const [myRooms, setMyRooms] = useState<Room[]>([]);
@@ -94,8 +95,8 @@ export default function RoomList() {
       return updated;
     });
 
-  if (loading) return <div className="flex justify-center py-16"><div className="h-7 w-7 animate-spin rounded-full border-2 border-[#7c3aed] border-t-transparent" /></div>;
-  if (error) return <div className="rounded-xl bg-white/5 p-4 text-center text-sm text-amber-400">Could not load rooms. Is the backend running?</div>;
+  if (loading) return <div className="flex justify-center py-16"><div className="h-7 w-7 animate-spin rounded-full border-2 border-black/20 border-t-black/60" /></div>;
+  if (error) return <div className="rounded-2xl border border-black/10 bg-white/45 p-4 text-center text-sm text-ink">Could not load rooms. Is the backend running?</div>;
 
   return (
     <div className="space-y-10">
@@ -103,15 +104,19 @@ export default function RoomList() {
       <section>
         <div className="mb-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <svg className="h-5 w-5 text-[#7c3aed]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0h4" /></svg>
-            <h3 className="text-xl font-bold text-white sm:text-2xl">My Rooms</h3>
+            <div className="rounded-xl bg-gradient-to-br from-[#f46c52]/80 to-[#8cc6e8]/80 p-[1px]">
+              <div className="flex h-8 w-8 items-center justify-center rounded-[11px] bg-white/65 ring-1 ring-white/70">
+                <HomeIcon className="h-4 w-4 text-ink" />
+              </div>
+            </div>
+            <h3 className="text-xl font-bold text-ink sm:text-2xl">My Rooms</h3>
           </div>
-          {myRooms.length > 0 && <span className="text-xs text-[#6b7280]">{myRooms.length}/5</span>}
+          {myRooms.length > 0 && <span className="text-xs text-ink-muted">{myRooms.length}/5</span>}
         </div>
         {myRooms.length === 0 ? (
-          <div className="rounded-xl border border-dashed p-10 text-center" style={{ borderColor: "rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.02)" }}>
-            <p className="text-sm text-[#6b7280]">You haven&apos;t created any rooms yet</p>
-            <p className="mt-1 text-xs text-[#6b7280]/50">Create your first room above</p>
+          <div className="rounded-3xl border border-dashed border-black/10 bg-white/35 p-10 text-center">
+            <p className="text-sm text-ink">You haven&apos;t created any rooms yet</p>
+            <p className="mt-1 text-xs text-ink-muted">Create your first room above</p>
           </div>
         ) : (
           <div className="grid gap-4 sm:grid-cols-1 lg:grid-cols-2">
@@ -123,12 +128,16 @@ export default function RoomList() {
       {/* Recently Joined */}
       <section>
         <div className="mb-4 flex items-center gap-2">
-          <svg className="h-5 w-5 text-[#06b6d4]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-          <h3 className="text-xl font-bold text-white sm:text-2xl">Recently Joined</h3>
+          <div className="rounded-xl bg-gradient-to-br from-[#8cc6e8]/80 to-[#f46c52]/80 p-[1px]">
+            <div className="flex h-8 w-8 items-center justify-center rounded-[11px] bg-white/65 ring-1 ring-white/70">
+              <History className="h-4 w-4 text-ink" />
+            </div>
+          </div>
+          <h3 className="text-xl font-bold text-ink sm:text-2xl">Recently Joined</h3>
         </div>
         {recentRooms.length === 0 ? (
-          <div className="rounded-xl border border-dashed p-10 text-center" style={{ borderColor: "rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.02)" }}>
-            <p className="text-sm text-[#6b7280]">Join a room using a code to see it here</p>
+          <div className="rounded-3xl border border-dashed border-black/10 bg-white/35 p-10 text-center">
+            <p className="text-sm text-ink-muted">Join a room using a code to see it here</p>
           </div>
         ) : (
           <div className="grid gap-4 sm:grid-cols-1 lg:grid-cols-2">

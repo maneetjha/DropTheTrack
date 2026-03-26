@@ -1,4 +1,4 @@
-# DropTheTrack
+ # DropTheTrack
 
 DropTheTrack is a real-time collaborative music room platform where a group can build a shared queue, vote on what should play next, and listen together with synced playback controls.
 

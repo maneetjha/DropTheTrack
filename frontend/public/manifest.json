@@ -1,0 +1,19 @@
+{
+  "name": "DropTheTrack",
+  "short_name": "DropTheTrack",
+  "description": "Collaborative music rooms — vote the queue and listen together.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#09090b",
+  "theme_color": "#f46c52",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/window.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

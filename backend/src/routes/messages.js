@@ -4,7 +4,7 @@ const { requireAuth } = require("../middleware/auth");
 
 const router = Router();
 
-// GET /api/rooms/:roomId/messages — last 50 messages
+// GET /api/rooms/:roomId/messages — last 100 messages
 router.get("/:roomId/messages", requireAuth, async (req, res) => {
   try {
     const { roomId } = req.params;
@@ -12,9 +12,10 @@ router.get("/:roomId/messages", requireAuth, async (req, res) => {
     const messages = await prisma.message.findMany({
       where: { roomId },
       orderBy: { createdAt: "desc" },
-      take: 50,
+      take: 100,
       include: {
-        user: { select: { id: true, name: true } },
+        user: { select: { id: true, name: true, avatarUrl: true } },
+        replyTo: { include: { user: { select: { id: true, name: true } } } },
       },
     });
 
@@ -24,6 +25,15 @@ router.get("/:roomId/messages", requireAuth, async (req, res) => {
       text: m.text,
       userId: m.user.id,
       userName: m.user.name,
+      userAvatarUrl: m.user.avatarUrl,
+      replyTo: m.replyTo
+        ? {
+            id: m.replyTo.id,
+            userName: m.replyTo.user?.name || "Unknown",
+            text: m.replyTo.text,
+          }
+        : null,
+      meta: m.meta,
       createdAt: m.createdAt,
     }));
 

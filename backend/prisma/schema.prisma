@@ -13,12 +13,15 @@ model User {
   name      String   @db.VarChar(100)
   email     String   @unique @db.VarChar(255)
   password  String
+  avatarUrl String?  @map("avatar_url")
   createdAt DateTime @default(now()) @map("created_at")
 
   songs       Song[]
   votes       Vote[]
   roomMembers RoomMember[]
   messages    Message[]
+  library     LibraryItem[]
+  playlists   Playlist[]
 
   @@map("users")
 }
@@ -87,10 +90,58 @@ model Message {
   roomId    String   @map("room_id") @db.Uuid
   userId    String   @map("user_id") @db.Uuid
   text      String   @db.VarChar(500)
+  replyToId String?  @map("reply_to_id") @db.Uuid
+  meta      Json?    @map("meta")
   createdAt DateTime @default(now()) @map("created_at")
 
   room Room @relation(fields: [roomId], references: [id], onDelete: Cascade)
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  replyTo Message? @relation("MessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies Message[] @relation("MessageReplies")
 
   @@map("messages")
+}
+
+model LibraryItem {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  title     String   @db.VarChar(300)
+  url       String
+  thumbnail String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, url])
+  @@index([userId, createdAt])
+  @@map("library_items")
+}
+
+model Playlist {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  name      String   @db.VarChar(120)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user  User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items PlaylistItem[]
+
+  @@index([userId, updatedAt])
+  @@map("playlists")
+}
+
+model PlaylistItem {
+  id         String   @id @default(uuid()) @db.Uuid
+  playlistId String   @map("playlist_id") @db.Uuid
+  title      String   @db.VarChar(300)
+  url        String
+  thumbnail  String?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  playlist Playlist @relation(fields: [playlistId], references: [id], onDelete: Cascade)
+
+  @@unique([playlistId, url])
+  @@index([playlistId, createdAt])
+  @@map("playlist_items")
 }
