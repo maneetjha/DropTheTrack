@@ -1,5 +1,5 @@
--- DropIndex
-DROP INDEX "votes_song_id_voter_id_key";
+-- DropIndex (IF EXISTS: prod DBs may never have had this name — e.g. push/squash or unique as constraint)
+DROP INDEX IF EXISTS "votes_song_id_voter_id_key";
 
 -- AlterTable
 ALTER TABLE "rooms" ADD COLUMN     "code" VARCHAR(8) NOT NULL,
