@@ -1,21 +1,9 @@
--- DropIndex (IF EXISTS: prod DBs may never have had this name — e.g. push/squash or unique as constraint)
+-- Idempotent: safe when DB was partially migrated, pushed, or already aligned (e.g. Neon + Prisma push).
+
 DROP INDEX IF EXISTS "votes_song_id_voter_id_key";
 
--- AlterTable
-ALTER TABLE "rooms" ADD COLUMN     "code" VARCHAR(8) NOT NULL,
-ADD COLUMN     "created_by" UUID,
-ADD COLUMN     "mode" VARCHAR(20) NOT NULL DEFAULT 'open';
-
--- AlterTable
-ALTER TABLE "songs" DROP COLUMN "added_by",
-ADD COLUMN     "user_id" UUID NOT NULL;
-
--- AlterTable
-ALTER TABLE "votes" DROP COLUMN "voter_id",
-ADD COLUMN     "user_id" UUID NOT NULL;
-
--- CreateTable
-CREATE TABLE "users" (
+-- New tables first (songs.user_id / votes.user_id may reference users)
+CREATE TABLE IF NOT EXISTS "users" (
     "id" UUID NOT NULL,
     "name" VARCHAR(100) NOT NULL,
     "email" VARCHAR(255) NOT NULL,
@@ -26,8 +14,7 @@ CREATE TABLE "users" (
     CONSTRAINT "users_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
-CREATE TABLE "room_members" (
+CREATE TABLE IF NOT EXISTS "room_members" (
     "id" UUID NOT NULL,
     "room_id" UUID NOT NULL,
     "user_id" UUID NOT NULL,
@@ -36,8 +23,7 @@ CREATE TABLE "room_members" (
     CONSTRAINT "room_members_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
-CREATE TABLE "messages" (
+CREATE TABLE IF NOT EXISTS "messages" (
     "id" UUID NOT NULL,
     "room_id" UUID NOT NULL,
     "user_id" UUID NOT NULL,
@@ -48,8 +34,7 @@ CREATE TABLE "messages" (
     CONSTRAINT "messages_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
-CREATE TABLE "library_items" (
+CREATE TABLE IF NOT EXISTS "library_items" (
     "id" UUID NOT NULL,
     "user_id" UUID NOT NULL,
     "title" VARCHAR(300) NOT NULL,
@@ -60,8 +45,7 @@ CREATE TABLE "library_items" (
     CONSTRAINT "library_items_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
-CREATE TABLE "playlists" (
+CREATE TABLE IF NOT EXISTS "playlists" (
     "id" UUID NOT NULL,
     "user_id" UUID NOT NULL,
     "name" VARCHAR(120) NOT NULL,
@@ -71,8 +55,7 @@ CREATE TABLE "playlists" (
     CONSTRAINT "playlists_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
-CREATE TABLE "playlist_items" (
+CREATE TABLE IF NOT EXISTS "playlist_items" (
     "id" UUID NOT NULL,
     "playlist_id" UUID NOT NULL,
     "title" VARCHAR(300) NOT NULL,
@@ -83,60 +66,47 @@ CREATE TABLE "playlist_items" (
     CONSTRAINT "playlist_items_pkey" PRIMARY KEY ("id")
 );
 
--- CreateIndex
-CREATE UNIQUE INDEX "users_email_key" ON "users"("email");
+-- messages may pre-exist without reply_to_id (CREATE TABLE IF NOT EXISTS skips)
+ALTER TABLE "messages" ADD COLUMN IF NOT EXISTS "reply_to_id" UUID;
+
+-- AlterTable rooms
+ALTER TABLE "rooms" ADD COLUMN IF NOT EXISTS "code" VARCHAR(8);
+ALTER TABLE "rooms" ADD COLUMN IF NOT EXISTS "created_by" UUID;
+ALTER TABLE "rooms" ADD COLUMN IF NOT EXISTS "mode" VARCHAR(20) NOT NULL DEFAULT 'open';
+UPDATE "rooms" SET "code" = SUBSTRING(REPLACE((gen_random_uuid())::text, '-', ''), 1, 8) WHERE "code" IS NULL;
+ALTER TABLE "rooms" ALTER COLUMN "code" SET NOT NULL;
+
+-- AlterTable songs
+ALTER TABLE "songs" DROP COLUMN IF EXISTS "added_by";
+ALTER TABLE "songs" ADD COLUMN IF NOT EXISTS "user_id" UUID;
+UPDATE "songs" SET "user_id" = (SELECT "id" FROM "users" ORDER BY "created_at" ASC LIMIT 1) WHERE "user_id" IS NULL AND EXISTS (SELECT 1 FROM "users");
+ALTER TABLE "songs" ALTER COLUMN "user_id" SET NOT NULL;
+
+-- AlterTable votes
+ALTER TABLE "votes" DROP COLUMN IF EXISTS "voter_id";
+ALTER TABLE "votes" ADD COLUMN IF NOT EXISTS "user_id" UUID;
+UPDATE "votes" SET "user_id" = (SELECT "id" FROM "users" ORDER BY "created_at" ASC LIMIT 1) WHERE "user_id" IS NULL AND EXISTS (SELECT 1 FROM "users");
+ALTER TABLE "votes" ALTER COLUMN "user_id" SET NOT NULL;
 
 -- CreateIndex
-CREATE UNIQUE INDEX "room_members_room_id_user_id_key" ON "room_members"("room_id", "user_id");
+CREATE UNIQUE INDEX IF NOT EXISTS "users_email_key" ON "users"("email");
+CREATE UNIQUE INDEX IF NOT EXISTS "room_members_room_id_user_id_key" ON "room_members"("room_id", "user_id");
+CREATE INDEX IF NOT EXISTS "library_items_user_id_created_at_idx" ON "library_items"("user_id", "created_at");
+CREATE UNIQUE INDEX IF NOT EXISTS "library_items_user_id_url_key" ON "library_items"("user_id", "url");
+CREATE INDEX IF NOT EXISTS "playlists_user_id_updated_at_idx" ON "playlists"("user_id", "updated_at");
+CREATE INDEX IF NOT EXISTS "playlist_items_playlist_id_created_at_idx" ON "playlist_items"("playlist_id", "created_at");
+CREATE UNIQUE INDEX IF NOT EXISTS "playlist_items_playlist_id_url_key" ON "playlist_items"("playlist_id", "url");
+CREATE UNIQUE INDEX IF NOT EXISTS "rooms_code_key" ON "rooms"("code");
+CREATE UNIQUE INDEX IF NOT EXISTS "votes_song_id_user_id_key" ON "votes"("song_id", "user_id");
 
--- CreateIndex
-CREATE INDEX "library_items_user_id_created_at_idx" ON "library_items"("user_id", "created_at");
-
--- CreateIndex
-CREATE UNIQUE INDEX "library_items_user_id_url_key" ON "library_items"("user_id", "url");
-
--- CreateIndex
-CREATE INDEX "playlists_user_id_updated_at_idx" ON "playlists"("user_id", "updated_at");
-
--- CreateIndex
-CREATE INDEX "playlist_items_playlist_id_created_at_idx" ON "playlist_items"("playlist_id", "created_at");
-
--- CreateIndex
-CREATE UNIQUE INDEX "playlist_items_playlist_id_url_key" ON "playlist_items"("playlist_id", "url");
-
--- CreateIndex
-CREATE UNIQUE INDEX "rooms_code_key" ON "rooms"("code");
-
--- CreateIndex
-CREATE UNIQUE INDEX "votes_song_id_user_id_key" ON "votes"("song_id", "user_id");
-
--- AddForeignKey
-ALTER TABLE "room_members" ADD CONSTRAINT "room_members_room_id_fkey" FOREIGN KEY ("room_id") REFERENCES "rooms"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "room_members" ADD CONSTRAINT "room_members_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "songs" ADD CONSTRAINT "songs_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "votes" ADD CONSTRAINT "votes_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "messages" ADD CONSTRAINT "messages_room_id_fkey" FOREIGN KEY ("room_id") REFERENCES "rooms"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "messages" ADD CONSTRAINT "messages_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "messages" ADD CONSTRAINT "messages_reply_to_id_fkey" FOREIGN KEY ("reply_to_id") REFERENCES "messages"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "library_items" ADD CONSTRAINT "library_items_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "playlists" ADD CONSTRAINT "playlists_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "playlist_items" ADD CONSTRAINT "playlist_items_playlist_id_fkey" FOREIGN KEY ("playlist_id") REFERENCES "playlists"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
+-- AddForeignKey (ignore if already present)
+DO $$ BEGIN ALTER TABLE "room_members" ADD CONSTRAINT "room_members_room_id_fkey" FOREIGN KEY ("room_id") REFERENCES "rooms"("id") ON DELETE CASCADE ON UPDATE CASCADE; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE "room_members" ADD CONSTRAINT "room_members_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE "songs" ADD CONSTRAINT "songs_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE "votes" ADD CONSTRAINT "votes_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE "messages" ADD CONSTRAINT "messages_room_id_fkey" FOREIGN KEY ("room_id") REFERENCES "rooms"("id") ON DELETE CASCADE ON UPDATE CASCADE; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE "messages" ADD CONSTRAINT "messages_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE "messages" ADD CONSTRAINT "messages_reply_to_id_fkey" FOREIGN KEY ("reply_to_id") REFERENCES "messages"("id") ON DELETE SET NULL ON UPDATE CASCADE; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE "library_items" ADD CONSTRAINT "library_items_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE "playlists" ADD CONSTRAINT "playlists_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE "playlist_items" ADD CONSTRAINT "playlist_items_playlist_id_fkey" FOREIGN KEY ("playlist_id") REFERENCES "playlists"("id") ON DELETE CASCADE ON UPDATE CASCADE; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
