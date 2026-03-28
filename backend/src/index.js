@@ -107,6 +107,7 @@ app.use((err, _req, res, _next) => {
 
 // ---------- Start ----------
 const PORT = process.env.PORT || 4000;
+const HOST = process.env.HOST || "0.0.0.0";
 
 async function start() {
   try {
@@ -129,11 +130,11 @@ async function start() {
       };
       server.once("error", onError);
       server.once("listening", onListening);
-      server.listen(PORT);
+      server.listen(PORT, HOST);
     });
 
-    console.log(`\n🎵 DropTheTrack backend running on http://localhost:${PORT}`);
-    console.log(`   Health check: http://localhost:${PORT}/api/ping`);
+    console.log(`\n🎵 DropTheTrack backend running on http://${HOST}:${PORT}`);
+    console.log(`   Local health: http://localhost:${PORT}/api/ping`);
     console.log(`   Prisma Studio: npx prisma studio\n`);
   } catch (err) {
     const code = err && err.code;

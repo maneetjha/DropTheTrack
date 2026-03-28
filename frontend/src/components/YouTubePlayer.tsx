@@ -38,6 +38,8 @@ interface YouTubePlayerProps {
    * so the bottom hint isn’t clipped above the tab bar. Parent must be a flex column with bounded height.
    */
   proportionedLayout?: boolean;
+  /** Hide the logo + “Drop The Track” row (e.g. desktop where Navbar shows branding). */
+  hidePlayerBrandHeader?: boolean;
 }
 
 const AUDIO_PREFS_KEY = "dtt-yt-audio";
@@ -79,6 +81,7 @@ export default function YouTubePlayer({
   onHostPlayback,
   onSongTitleClick,
   proportionedLayout = false,
+  hidePlayerBrandHeader = false,
 }: YouTubePlayerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<any>(null);
@@ -271,11 +274,7 @@ export default function YouTubePlayer({
 
             // If host has paused, pause immediately
             const latestSync = syncStateRef.current;
-            const pauseIsFresh =
-              !!latestSync?.isPaused &&
-              Number.isFinite(latestSync.updatedAt) &&
-              Date.now() - latestSync.updatedAt < 4000;
-            if (pauseIsFresh) {
+            if (latestSync?.isPaused) {
               hostPausedRef.current = true;
               setPlayerPaused(true);
               e.target.seekTo(latestSync.currentTime, true);
@@ -806,27 +805,28 @@ export default function YouTubePlayer({
   // ---- Active player ----
   if (proportionedLayout) {
     return (
-      <div className="flex h-full w-full flex-col">
+      <div className="flex h-full min-h-0 w-full flex-col">
 
-        {/* ── Header: logo + app name ── */}
-        <div className="flex shrink-0 items-center gap-3 px-1 pb-4 pt-5">
-          <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-xl bg-black/30 ring-1 ring-white/10">
-            <Image src="/dtt-logo.png" alt="Drop The Track" fill className="object-contain mix-blend-screen" priority />
+        {!hidePlayerBrandHeader && (
+          <div className="flex shrink-0 items-center gap-3 px-1 pb-4 pt-5">
+            <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-xl bg-black/30 ring-1 ring-white/10">
+              <Image src="/dtt-logo.png" alt="Drop The Track" fill className="object-contain mix-blend-screen" priority />
+            </div>
+            <div className="min-w-0">
+              <p
+                className="font-display text-[20px] font-bold leading-tight tracking-tight"
+                style={{
+                  background: "linear-gradient(110deg, #f4f4f5 0%, #f48a72 55%, #8cc6e8 100%)",
+                  WebkitBackgroundClip: "text",
+                  backgroundClip: "text",
+                  color: "transparent",
+                }}
+              >
+                Drop The Track
+              </p>
+            </div>
           </div>
-          <div className="min-w-0">
-            <p
-              className="font-display text-[20px] font-bold leading-tight tracking-tight"
-              style={{
-                background: "linear-gradient(110deg, #f4f4f5 0%, #f48a72 55%, #8cc6e8 100%)",
-                WebkitBackgroundClip: "text",
-                backgroundClip: "text",
-                color: "transparent",
-              }}
-            >
-              Drop The Track
-            </p>
-          </div>
-        </div>
+        )}
 
         {/* ── Video player ── */}
         <div className="relative w-full shrink-0">
@@ -845,9 +845,8 @@ export default function YouTubePlayer({
           })}
         </div>
 
-        {/* ── Mid flex spacer ── */}
-        <div className="min-h-3 flex-1" />
-
+        {/* Card + controls: pin to bottom of column; video stays at top */}
+        <div className="mt-auto flex w-full shrink-0 flex-col gap-0 pt-3">
         {/* ── Song card ── */}
         <div className="w-full shrink-0">
           {onSongTitleClick ? (
@@ -924,6 +923,7 @@ export default function YouTubePlayer({
           {progressBlock(false)}
           {controlsBlock(false)}
           {footerHint(false)}
+        </div>
         </div>
 
       </div>

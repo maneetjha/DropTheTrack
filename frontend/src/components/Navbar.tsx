@@ -13,7 +13,7 @@ export default function Navbar({
   hideLibrary = false,
   onAvatarClick,
 }: {
-  variant?: "dark" | "aurora" | "duotone" | "library";
+  variant?: "dark" | "aurora" | "duotone" | "library" | "room";
   brand?: "icon+text" | "text";
   /** When true, Library links are hidden (e.g. in-room; use queue panel for playlists). */
   hideLibrary?: boolean;
@@ -25,35 +25,44 @@ export default function Navbar({
   const isAurora = variant === "aurora";
   const isDuotone = variant === "duotone";
   const isLibrary = variant === "library";
+  const isRoom = variant === "room";
   const isLight = isAurora || isDuotone;
   const onLibraryRoute = pathname === "/library" || pathname.startsWith("/library/");
 
   return (
     <header
       className={`fixed top-0 left-0 right-0 z-50 flex h-[72px] items-center justify-between px-5 font-sans antialiased sm:px-8 ${
-        isLibrary
-          ? "bg-black text-white"
-          : isLight
-            ? "bg-white/25 backdrop-blur-xl"
-            : "bg-[var(--background)]"
+        isRoom
+          ? "bg-gradient-to-b from-[#080706] via-[#0c0a09] to-[#1a140f] text-white"
+          : isLibrary
+            ? "bg-black text-white"
+            : isLight
+              ? "bg-white/25 backdrop-blur-xl"
+              : "bg-[var(--background)]"
       }`}
       style={{
-        borderBottom: isLibrary
-          ? "1px solid rgba(255,255,255,0.08)"
-          : isLight
-            ? "1px solid rgba(0,0,0,0.06)"
-            : "1px solid rgba(255,255,255,0.05)",
+        borderBottom: isRoom
+          ? "1px solid rgba(255,255,255,0.06)"
+          : isLibrary
+            ? "1px solid rgba(255,255,255,0.08)"
+            : isLight
+              ? "1px solid rgba(0,0,0,0.06)"
+              : "1px solid rgba(255,255,255,0.05)",
       }}
     >
       <Link
         href="/"
         className={`flex items-center gap-3 transition-opacity hover:opacity-85 ${
-          isLibrary ? "text-white" : ""
+          isLibrary || isRoom ? "text-white" : ""
         }`}
       >
         {brand === "icon+text" ? (
           isDuotone ? (
             <DuotoneLogoBadge size={48} />
+          ) : isRoom ? (
+            <div className="relative h-11 w-11 shrink-0 overflow-hidden rounded-xl bg-black/30 ring-1 ring-white/10 sm:h-12 sm:w-12">
+              <Image src="/dtt-logo.png" alt="Drop The Track" fill className="object-contain mix-blend-screen" priority />
+            </div>
           ) : (
             <div
               className={`relative h-11 w-11 shrink-0 overflow-hidden rounded-xl ring-1 sm:h-12 sm:w-12 ${
@@ -79,11 +88,25 @@ export default function Navbar({
           )
         ) : null}
         <span
-          className={`text-[17px] font-bold tracking-tight sm:text-[1.35rem] ${
-            isLibrary ? "text-white" : isLight ? "text-ink" : "text-white"
-          }`}
+          className={
+            isRoom
+              ? "font-display text-[17px] font-bold tracking-tight sm:text-[1.35rem]"
+              : `text-[17px] font-bold tracking-tight sm:text-[1.35rem] ${
+                  isLibrary ? "text-white" : isLight ? "text-ink" : "text-white"
+                }`
+          }
+          style={
+            isRoom
+              ? {
+                  background: "linear-gradient(110deg, #f4f4f5 0%, #f48a72 55%, #8cc6e8 100%)",
+                  WebkitBackgroundClip: "text",
+                  backgroundClip: "text",
+                  color: "transparent",
+                }
+              : undefined
+          }
         >
-          DropTheTrack
+          {isRoom ? "Drop The Track" : "DropTheTrack"}
         </span>
       </Link>
       <div className="flex items-center gap-2.5 sm:gap-3">

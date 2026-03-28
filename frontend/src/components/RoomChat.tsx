@@ -160,7 +160,7 @@ export default function RoomChat({ roomId, currentUserId, fullHeight, onClose, h
                   {msg.meta.title || "Song added"}
                 </p>
                 <p className="mt-0.5 text-[11px] text-[var(--text-secondary)]">
-                  Added to queue by <span className="font-semibold text-[var(--text-primary)]">{addedByName}</span>
+                  Added by <span className="font-semibold text-[var(--text-primary)]">{addedByName}</span>
                 </p>
               </div>
               <span className="shrink-0 text-[11px] text-[var(--text-muted)]">{timeAgo(msg.createdAt)}</span>

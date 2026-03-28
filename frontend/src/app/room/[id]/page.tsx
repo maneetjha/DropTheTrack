@@ -14,6 +14,7 @@ import { getSocket } from "@/lib/socket";
 import { useAuth } from "@/lib/auth-context";
 import Navbar from "@/components/Navbar";
 import YouTubePlayer, { PlaybackState } from "@/components/YouTubePlayer";
+import MobileYouTubePlayer from "@/components/MobileYouTubePlayer";
 import RoomChat from "@/components/RoomChat";
 import TrackDetailSheet from "@/components/TrackDetailSheet";
 import PlaylistCoverGrid from "@/components/PlaylistCoverGrid";
@@ -23,6 +24,15 @@ import {
 } from "lucide-react";
 
 interface RoomUser { id: string; name: string; isHost?: boolean; isOffline?: boolean; }
+
+function stableDateLabel(input: string): string {
+  try {
+    // Stable across SSR/client locales to avoid hydration mismatch.
+    return new Date(input).toISOString().slice(0, 10);
+  } catch {
+    return "";
+  }
+}
 
 // ---- Media query hooks (SSR-safe) ----
 const LG = "(min-width: 1024px)";
@@ -1011,7 +1021,7 @@ export default function RoomPage() {
                           <div className="relative min-w-0 flex-1">
                             <p className="truncate text-[13px] font-semibold text-[var(--text-primary)]">{p.name}</p>
                             <p className="mt-1 text-[11px] text-[var(--text-muted)]">
-                              {p.itemCount} {p.itemCount === 1 ? "track" : "tracks"} · Updated {new Date(p.updatedAt).toLocaleDateString()}
+                              {p.itemCount} {p.itemCount === 1 ? "track" : "tracks"} · Updated {stableDateLabel(p.updatedAt)}
                             </p>
                           </div>
                           <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/[0.03] text-[var(--text-muted)] transition group-hover:border-white/15 group-hover:text-[var(--text-primary)]">
@@ -1133,25 +1143,40 @@ export default function RoomPage() {
     <div
       className={
         isPhoneLayout
-          ? "flex h-full min-h-0 flex-1 flex-col overflow-hidden px-5 py-3"
-          : "flex h-full flex-col items-center overflow-y-auto px-5 py-6 md:px-8"
+          ? "flex h-full min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden px-5 py-3"
+          : "flex min-h-0 flex-1 flex-col items-center overflow-y-auto px-5 py-6 md:px-8"
       }
     >
       <div
-        className={`w-full transition-all duration-300 ${isPhoneLayout ? "flex min-h-0 max-w-none flex-1 flex-col" : chatCollapsed ? "max-w-[640px]" : "max-w-[560px]"}`}
+        className={`w-full transition-all duration-300 ${isPhoneLayout ? "flex min-h-0 max-w-none flex-1 flex-col" : `flex min-h-0 flex-1 flex-col ${chatCollapsed ? "max-w-[640px]" : "max-w-[560px]"}`}`}
       >
-        <YouTubePlayer
-          videoId={currentVideoId}
-          songTitle={nowPlaying?.title}
-          songArtist={nowPlaying?.user?.name}
-          thumbnailUrl={nowPlaying?.thumbnail}
-          isHost={isCreator}
-          syncState={syncState}
-          onSkip={handleSongEnd}
-          onHostPlayback={handleHostPlayback}
-          onSongTitleClick={nowPlaying ? () => setTrackSheet({ kind: "song", song: nowPlaying }) : undefined}
-          proportionedLayout={isPhoneLayout}
-        />
+        {isPhoneLayout ? (
+          <MobileYouTubePlayer
+            videoId={currentVideoId}
+            songTitle={nowPlaying?.title}
+            songArtist={nowPlaying?.user?.name}
+            thumbnailUrl={nowPlaying?.thumbnail}
+            isHost={isCreator}
+            syncState={syncState}
+            onSkip={handleSongEnd}
+            onHostPlayback={handleHostPlayback}
+            onSongTitleClick={nowPlaying ? () => setTrackSheet({ kind: "song", song: nowPlaying }) : undefined}
+          />
+        ) : (
+          <YouTubePlayer
+            videoId={currentVideoId}
+            songTitle={nowPlaying?.title}
+            songArtist={nowPlaying?.user?.name}
+            thumbnailUrl={nowPlaying?.thumbnail}
+            isHost={isCreator}
+            syncState={syncState}
+            onSkip={handleSongEnd}
+            onHostPlayback={handleHostPlayback}
+            onSongTitleClick={nowPlaying ? () => setTrackSheet({ kind: "song", song: nowPlaying }) : undefined}
+            proportionedLayout
+            hidePlayerBrandHeader={isDesktop}
+          />
+        )}
       </div>
     </div>
   );
@@ -1181,7 +1206,11 @@ export default function RoomPage() {
           </button>
         </header>
       ) : (
-        <Navbar hideLibrary onAvatarClick={user ? handleOpenProfile : undefined} />
+        <Navbar
+          variant="room"
+          hideLibrary
+          onAvatarClick={user ? handleOpenProfile : undefined}
+        />
       )}
 
       {/* Connection banner — below mobile header (48px) or desktop navbar (72px) */}
@@ -1203,7 +1232,7 @@ export default function RoomPage() {
             {queuePanelContent}
           </aside>
           {/* Now Playing — OLED-friendly black behind video */}
-          <main className="relative flex-1 min-w-0 overflow-y-auto bg-[var(--room-stage)] transition-[flex] duration-300 ease-in-out">
+          <main className="relative flex min-h-0 flex-1 flex-col overflow-y-auto bg-[var(--room-stage)] transition-[flex] duration-300 ease-in-out">
             {playerPanelContent}
             {/* "Clubhouse" button — only when collapsed */}
             {chatCollapsed && (
@@ -1239,7 +1268,7 @@ export default function RoomPage() {
           <aside className="flex min-h-0 w-[300px] shrink-0 flex-col border-r border-[var(--border)] bg-[var(--rail-bg)] pt-3 overflow-visible">
             {queuePanelContent}
           </aside>
-          <main className="relative flex-1 min-w-0 overflow-y-auto bg-[var(--room-stage)]">
+          <main className="relative flex min-h-0 flex-1 flex-col overflow-y-auto bg-[var(--room-stage)]">
             {playerPanelContent}
             {/* Chat toggle button */}
             <button onClick={() => { setShowChatSlide(!showChatSlide); setUnreadChat(0); }} className="fixed bottom-6 right-6 z-40 flex h-12 w-12 items-center justify-center rounded-full bg-[var(--brand)] text-white shadow-lg transition hover:brightness-110 active:scale-95">
@@ -1275,7 +1304,7 @@ export default function RoomPage() {
             {queuePanelContent}
           </div>
           <div
-            className={`absolute inset-x-0 bottom-[calc(3.5rem+env(safe-area-inset-bottom))] top-12 flex min-h-0 flex-col bg-[var(--room-stage)] ${mobileTab === "player" ? "z-10 overflow-hidden" : "z-0 pointer-events-none -translate-x-full overflow-y-auto"}`}
+            className={`absolute inset-x-0 bottom-[calc(3.5rem+env(safe-area-inset-bottom))] top-12 flex min-h-0 flex-col bg-[var(--room-stage)] ${mobileTab === "player" ? "z-10 overflow-y-auto overflow-x-hidden" : "z-0 pointer-events-none -translate-x-full overflow-y-auto"}`}
           >
             {playerPanelContent}
           </div>
@@ -1444,7 +1473,7 @@ export default function RoomPage() {
                       </div>
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-[12.5px] font-semibold text-[var(--text-primary)]">{p.name}</p>
-                        <p className="mt-0.5 text-[10.5px] text-[var(--text-muted)]">Updated {new Date(p.updatedAt).toLocaleDateString()}</p>
+                        <p className="mt-0.5 text-[10.5px] text-[var(--text-muted)]">Updated {stableDateLabel(p.updatedAt)}</p>
                       </div>
                       <ChevronRight className="h-4 w-4 text-[var(--text-muted)]" />
                     </button>
