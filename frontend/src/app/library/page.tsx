@@ -128,8 +128,10 @@ export default function LibraryPage() {
               </div>
             ) : playlists.length === 0 ? (
               <div className="mt-10 rounded-2xl border border-dashed border-black/15 bg-white/35 p-10 text-center">
-                <p className="text-sm text-ink-muted">No playlists yet.</p>
-                <p className="mt-1 text-xs text-ink-muted/80">Create one or import a YouTube playlist link.</p>
+                <p className="text-sm font-medium text-[rgba(17,24,39,0.88)]">No playlists yet.</p>
+                <p className="mx-auto mt-1.5 max-w-sm text-xs leading-relaxed text-[rgba(17,24,39,0.62)]">
+                  Create one or import a YouTube playlist link.
+                </p>
               </div>
             ) : (
               <div className="mt-6 grid gap-4 sm:grid-cols-2">
