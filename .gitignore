@@ -7,3 +7,5 @@ dist/
 *.jpg
 *.png
 *.html
+# Ship Next.js public assets (root *.png would otherwise omit them from deploys)
+!frontend/public/**/*.png
