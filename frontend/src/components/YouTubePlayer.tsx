@@ -108,6 +108,8 @@ export default function YouTubePlayer({
   const progressInterval = useRef<ReturnType<typeof setInterval> | null>(null);
   const onSkipRef = useRef(onSkip);
   useEffect(() => { onSkipRef.current = onSkip; }, [onSkip]);
+  const isHostRef = useRef(isHost);
+  isHostRef.current = isHost;
   useEffect(() => { readyRef.current = ready; }, [ready]);
 
   // Whether we're intentionally paused by host (ignore auto-resume)
@@ -359,9 +361,9 @@ export default function YouTubePlayer({
             } else if (state === 3) {
               setIsBuffering(true);
             } else if (state === 0) {
-              // Ended
+              // Ended — only host advances queue (guest players emit ENDED spuriously with others in room)
               setPlayerPaused(false);
-              onSkipRef.current();
+              if (isHostRef.current) onSkipRef.current();
             }
           },
         },

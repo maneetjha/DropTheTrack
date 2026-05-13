@@ -108,6 +108,8 @@ export default function MobileYouTubePlayer({
   const progressInterval = useRef<ReturnType<typeof setInterval> | null>(null);
   const syncStateRef = useRef<MobilePlaybackState | null>(null);
   syncStateRef.current = syncState;
+  const isHostRef = useRef(isHost);
+  isHostRef.current = isHost;
 
   useEffect(() => {
     const p = readAudioPrefs();
@@ -465,7 +467,7 @@ export default function MobileYouTubePlayer({
               }
             } else if (st === 0) {
               setPlayerPaused(false);
-              onSkip();
+              if (isHostRef.current) onSkip();
             }
           },
           onError: (e: any) => {

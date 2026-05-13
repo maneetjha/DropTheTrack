@@ -181,11 +181,11 @@ router.post("/songs/:songId/play", requireAuth, async (req, res) => {
       return res.status(403).json({ error: "Only the host can control playback" });
     }
 
-    // Clear any current "now playing" in this room, then set the new one
+    // Finish any other now-playing row (otherwise it stays played:false and reappears in the queue)
     await prisma.$transaction([
       prisma.song.updateMany({
-        where: { roomId: song.roomId, isPlaying: true },
-        data: { isPlaying: false },
+        where: { roomId: song.roomId, isPlaying: true, id: { not: songId } },
+        data: { isPlaying: false, played: true },
       }),
       prisma.song.update({
         where: { id: songId },

@@ -122,6 +122,7 @@ export default function RoomPage() {
   const prevNowPlayingIdRef = useRef<string | null>(null);
   // Keep latest user in a ref so the socket effect can read it without re-running
   const userRef = useRef(user);
+  userRef.current = user;
   useEffect(() => { userRef.current = user; }, [user]);
   const [movingToNowPlaying, setMovingToNowPlaying] = useState<Song | null>(null);
   const [nowPlayingAnimKey, setNowPlayingAnimKey] = useState(0);
@@ -221,6 +222,19 @@ export default function RoomPage() {
       socket.disconnect();
     };
   }, [id, authLoading]);
+
+  // Re-announce identity when login resolves so server host checks (song-ended, playback-changed) match the real user.
+  useEffect(() => {
+    if (!id || authLoading) return;
+    const socket = getSocket();
+    if (!socket.connected) return;
+    const stableAnon = anonIdRef.current || `anon-${socket.id}`;
+    socket.emit("join-room", {
+      roomId: id,
+      userId: user?.id || stableAnon,
+      userName: user?.name || "Anonymous",
+    });
+  }, [id, authLoading, user?.id, user?.name]);
 
   // Auto-switch to player tab only on initial load if a song is already playing
   const initialTabSet = useRef(false);
@@ -435,11 +449,10 @@ export default function RoomPage() {
   const handlePlaySong = async (songId: string) => { if (!id) return; try { await playSong(songId); await fetchSongs(); getSocket().emit("playback-changed", { roomId: id }); } catch (e) { setModal({ title: "Error", message: e instanceof Error ? e.message : "Failed to play", type: "error" }); } };
   const handleSkipSong = useCallback(async () => { if (!id) return; /* Immediately mark song as played so it disappears from queue + stops the player */ setSongs((prev) => prev.map((s) => s.isPlaying ? { ...s, isPlaying: false, played: true } : s)); try { const u = await skipSong(id); setSongs(u); getSocket().emit("playback-changed", { roomId: id }); } catch (e) { console.error("Skip failed:", e); } }, [id]);
   const isCreatorRef = useRef(false);
-  // When a song ends, any client emits song-ended — backend handles the skip with a lock
+  // Natural end: only host may advance the queue (guest iframes often fire ENDED during sync/load).
   const handleSongEnd = useCallback(() => {
-    if (!id) return;
-    // Immediately mark as played so it disappears from queue + stops the player
-    setSongs((prev) => prev.map((s) => s.isPlaying ? { ...s, isPlaying: false, played: true } : s));
+    if (!id || !isCreatorRef.current) return;
+    setSongs((prev) => prev.map((s) => (s.isPlaying ? { ...s, isPlaying: false, played: true } : s)));
     getSocket().emit("song-ended", { roomId: id });
   }, [id]);
   const handleHostPlayback = useCallback((isPaused: boolean, currentTime: number) => { if (!id) return; getSocket().emit("host-playback", { roomId: id, isPaused, currentTime }); }, [id]);
@@ -465,6 +478,7 @@ export default function RoomPage() {
 
   // ---- Derived ----
   const isCreator = !!(user && room && room.createdBy === user.id);
+  isCreatorRef.current = isCreator;
   useEffect(() => { isCreatorRef.current = isCreator; }, [isCreator]);
   const isListenOnly = room?.mode === "listen_only";
   const canAddSongs = !!(user && (!isListenOnly || isCreator));

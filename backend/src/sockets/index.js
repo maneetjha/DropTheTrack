@@ -157,10 +157,15 @@ function initSockets(io) {
       } catch { /* non-critical */ }
     });
 
-    // Song ended — any client can emit this to auto-advance the queue
+    // Song ended — only the room host may advance (guest YT iframes often emit ENDED spuriously)
     // Uses a Redis lock to prevent duplicate skips from multiple clients
     socket.on("song-ended", async ({ roomId }) => {
       if (!roomId) return;
+      const hostOk = await assertRoomHost(socket, roomId);
+      if (!hostOk) {
+        console.warn(`[Socket] song-ended ignored: not host (room ${roomId})`);
+        return;
+      }
       const lockKey = `room:${roomId}:skip-lock`;
       try {
         let acquired;
@@ -481,8 +486,8 @@ async function tryAutostartAfterSongAdded(roomId, songId) {
 
     await prisma.$transaction([
       prisma.song.updateMany({
-        where: { roomId, isPlaying: true },
-        data: { isPlaying: false },
+        where: { roomId, isPlaying: true, id: { not: songId } },
+        data: { isPlaying: false, played: true },
       }),
       prisma.song.update({
         where: { id: songId },

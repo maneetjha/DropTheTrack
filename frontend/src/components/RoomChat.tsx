@@ -53,12 +53,14 @@ export default function RoomChat({ roomId, currentUserId, fullHeight, onClose, h
   const [msgMenu, setMsgMenu] = useState<null | { x: number; y: number; msg: { id: string; userName: string; text: string } }>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const userScrolledUp = useRef(false);
+  /** Near-bottom pin: before each append, true if list was pinned — new rows should follow. */
+  const stickToBottomRef = useRef(true);
   const swipeStart = useRef<null | { x: number; y: number; msg: { id: string; userName: string; text: string } }>(null);
   const swipeTriggered = useRef(false);
   const swipeEl = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
+    stickToBottomRef.current = true;
     getMessages(roomId)
       .then((m) => setMessages(m.slice(-100)))
       .catch(() => {});
@@ -67,11 +69,14 @@ export default function RoomChat({ roomId, currentUserId, fullHeight, onClose, h
   useEffect(() => {
     const socket = getSocket();
     const handler = (msg: ChatMessage) => {
+      const el = scrollRef.current;
+      const dist = el ? el.scrollHeight - el.scrollTop - el.clientHeight : 0;
+      stickToBottomRef.current = !el || dist <= 160;
+      if (!stickToBottomRef.current) setHasUnreadBelow(true);
       setMessages((prev) => {
         const next = [...prev, msg];
         return next.length > 100 ? next.slice(-100) : next;
       });
-      if (userScrolledUp.current) setHasUnreadBelow(true);
     };
     socket.on("new-message", handler);
     return () => { socket.off("new-message", handler); };
@@ -94,18 +99,25 @@ export default function RoomChat({ roomId, currentUserId, fullHeight, onClose, h
     };
   }, [fullHeight]);
 
-  // Auto-scroll unless user scrolled up
+  // Auto-scroll when list was pinned to bottom (incl. new socket messages) — double rAF after layout
   useEffect(() => {
-    if (scrollRef.current && !userScrolledUp.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
+    if (!scrollRef.current || !stickToBottomRef.current) return;
+    setHasUnreadBelow(false);
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const el = scrollRef.current;
+        if (!el) return;
+        el.scrollTop = el.scrollHeight;
+      });
+    });
   }, [messages]);
 
   const handleScroll = () => {
     if (!scrollRef.current) return;
     const { scrollTop, scrollHeight, clientHeight } = scrollRef.current;
-    userScrolledUp.current = scrollHeight - scrollTop - clientHeight > 60;
-    if (!userScrolledUp.current) setHasUnreadBelow(false);
+    const dist = scrollHeight - scrollTop - clientHeight;
+    stickToBottomRef.current = dist <= 160;
+    if (stickToBottomRef.current) setHasUnreadBelow(false);
   };
 
   useEffect(() => {
@@ -125,7 +137,7 @@ export default function RoomChat({ roomId, currentUserId, fullHeight, onClose, h
     getSocket().emit("chat-message", { roomId, text, replyToId: replyingTo?.id });
     setInput("");
     setReplyingTo(null);
-    userScrolledUp.current = false;
+    stickToBottomRef.current = true;
     // Keep typing flow uninterrupted after sending.
     requestAnimationFrame(() => inputRef.current?.focus());
   }, [input, roomId, currentUserId, replyingTo?.id]);
@@ -420,7 +432,7 @@ export default function RoomChat({ roomId, currentUserId, fullHeight, onClose, h
               onClick={() => {
                 scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
                 setHasUnreadBelow(false);
-                userScrolledUp.current = false;
+                stickToBottomRef.current = true;
               }}
               className="pointer-events-auto rounded-full border border-white/10 bg-white/[0.06] px-3 py-1.5 text-[12px] font-semibold text-[var(--text-primary)] shadow-[0_18px_44px_rgba(0,0,0,0.35)] backdrop-blur"
             >
